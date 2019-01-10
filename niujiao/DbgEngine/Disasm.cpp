@@ -179,7 +179,7 @@ bool Disasm::DisasmFile()
 		DWORD aa = FuncPop();
 		DisasmPoint->CurrentAddr = DisasmPoint->MapFileAddr + aa - DisasmPoint->BaseOfCode + DisasmPoint->BaseOfCodeInFile;//映射基址+地址-内存基址+文件基址
 
-		sprintf_s(str, "------------开始解析首地址%X\n", DisasmPoint->CurrentAddr);
+		//sprintf_s(str, "------------开始解析首地址%X\n", DisasmPoint->CurrentAddr);
 		//printf(str);
 		while (!SegmentIsFinished) //循环解析一段指令
 		{
@@ -190,7 +190,7 @@ bool Disasm::DisasmFile()
 			DisasmResultTmp->CurrentAddr = DisasmPoint->CurrentAddr - DisasmPoint->FileStartOfCode + DisasmPoint->BaseOfCode;
 			DWORD AddrLenghtFlag = DisasmPoint->CurrentAddr;
 
-			sprintf_s(str, "开始解析指令地址%X\t", DisasmResultTmp->CurrentAddr);
+			//sprintf_s(str, "开始解析指令地址%X\t", DisasmResultTmp->CurrentAddr);
 			//printf(str);
 			while (true) //循环解析一条指令：不定数量的前缀和其他内容
 			{
@@ -223,13 +223,13 @@ bool Disasm::DisasmFile()
 				}
 			}
 
-			sprintf_s(str, "\t 指令长度%d\n", DisasmResultTmp->CurrentLen);
+			//sprintf_s(str, "\t 指令长度%d\n", DisasmResultTmp->CurrentLen);
 			//printf(str);
 		}
 	}
 	//TestPrintToFile();
 	IndexResultBySeq(DisasmPoint);
-	printf("解析完毕 \n");
+	//printf("解析完毕 \n");
 	return true;
 }
 bool Disasm::TestPrintToFile() const
@@ -435,7 +435,7 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			INT_1:
 				Offset = *(BYTE*)DisasmPoint->CurrentAddr;
 				if ((Offset & 0x80) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFF) + 1);
+					Offset = ((Offset ^ 0xFF) + 1)*-1;
 				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(BYTE);  //操作数长度
 				break;
 			case OT__w:
@@ -443,7 +443,7 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			INT_2:
 				Offset = *(short*)DisasmPoint->CurrentAddr;
 				if ((Offset & 0x8000) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFFFF) + 1);
+					Offset = ((Offset ^ 0xFFFF) + 1)*-1;
 				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(short);  //操作数长度
 				break;
 			case OT__d:
@@ -451,7 +451,7 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			INT_4:
 				Offset = *(DWORD32*)DisasmPoint->CurrentAddr;
 				if ((Offset & 0x80000000) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFFFFFFFF) + 1);
+					Offset = ((Offset ^ 0xFFFFFFFF) + 1)*-1;
 				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(DWORD32);  //操作数长度
 				break;
 			case OT__q:
@@ -459,7 +459,7 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			INT_8:
 				Offset = *(DWORD64*)DisasmPoint->CurrentAddr;
 				if ((Offset & 0x8000000000000000) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFFFFFFFFFFFFFFFF) + 1);
+					Offset = ((Offset ^ 0xFFFFFFFFFFFFFFFF) + 1)*-1;
 				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(DWORD64);  //操作数长度
 				break;
 			case OT__z:

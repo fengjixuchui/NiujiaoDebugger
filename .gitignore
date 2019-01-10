@@ -328,3 +328,18 @@ ASALocalRun/
 
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
+/output/DuiLib_Static.lib
+/output/niujiao.exe
+/output/niujiao.exp
+/output/niujiao.lib
+/output/python37_d.lib
+/output/python37_d_64.lib
+/output/vcruntime140.dll
+/Build/Lib/DuiLib_Static_d.lib
+/Build/Lib
+/output/niujiao_d.exe
+/output/niujiao_d_64.exe
+/output/niujiao_d.exp
+/output/niujiao_d.lib
+/output/niujiao_d_64.exp
+/output/niujiao_d_64.lib

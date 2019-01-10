@@ -22,7 +22,6 @@
     <_DebugPreprocessorDefinition>NDEBUG;</_DebugPreprocessorDefinition>
     <_DebugPreprocessorDefinition Condition="$(Configuration) == 'Debug'">_DEBUG;</_DebugPreprocessorDefinition>
     <_PlatformPreprocessorDefinition>_WIN32;</_PlatformPreprocessorDefinition>
-    <_PlatformPreprocessorDefinition Condition="$(Platform) == 'x64'">_WIN64;_M_X64;</_PlatformPreprocessorDefinition>
     <_PydPreprocessorDefinition Condition="$(TargetExt) == '.pyd'">Py_BUILD_CORE_MODULE;</_PydPreprocessorDefinition>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -61,7 +60,6 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <IgnoreSpecificDefaultLibraries>LIBC;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <TargetMachine>MachineX86</TargetMachine>
-      <TargetMachine Condition="'$(Platform)' == 'x64'">MachineX64</TargetMachine>
       <ProfileGuidedDatabase Condition="$(SupportPGO)">$(OutDir)$(TargetName).pgd</ProfileGuidedDatabase>
       <LinkTimeCodeGeneration Condition="$(Configuration) == 'Release'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <LinkTimeCodeGeneration Condition="$(SupportPGO) and $(Configuration) == 'PGInstrument'">PGInstrument</LinkTimeCodeGeneration>
@@ -82,7 +80,6 @@
       <MkTypLibCompatible>true</MkTypLibCompatible>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <TargetEnvironment>Win32</TargetEnvironment>
-      <TargetEnvironment Condition="'$(Platform)' == 'x64'">X64</TargetEnvironment>
       <OutputDirectory>$(IntDir)</OutputDirectory>
       <InterfaceIdentifierFileName>$(MSBuildProjectName)_i.c</InterfaceIdentifierFileName>
       <ProxyFileName>$(MSBuildProjectName)_p.c</ProxyFileName>

@@ -19,9 +19,6 @@ CImageInfo::CImageInfo(LPCTSTR FileName)
 	MapFileAddr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
 
 	GetImageInfo((DWORD)MapFileAddr);
-
-
-
 }
 
 CImageInfo::CImageInfo(HANDLE hFile)
