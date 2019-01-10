@@ -32,11 +32,13 @@ niujiao_readpe(PyObject *self, PyObject *args)
 	TCHAR tFileName[1024] = { 0 };
 
 	MultiByteToWideChar(CP_ACP, 0, FileName, strlen(FileName), tFileName, 32);
-	CImageInfo *ImageInfo =new  CImageInfo(tFileName);
+	CImageInfo *ImageInfo =new  CImageInfo();
+	if (ImageInfo->ReadImage(tFileName) == false)
+		return (PyObject *)&_PyNone_Type;
+
 	PEFormat* pf = (PEFormat *)PEFormatType.tp_new(&PEFormatType, 
-													Py_BuildValue("(i)", (int)ImageInfo) , 
+													Py_BuildValue("(l)", (UINT64)ImageInfo) , 
 													NULL);
-	
 	return (PyObject *)pf;
 }
 
@@ -53,12 +55,12 @@ PyObject * niujiao_asmfromstr(PyObject * self, PyObject * args)
 	if (aaa.AsmFromStr(tFileName, &AsmResultSet) == 0)
 	{
 		return AsmObjectType.tp_new(&AsmObjectType, 
-			Py_BuildValue("(s,i)",(int)FileName,(int)&AsmResultSet),
+			Py_BuildValue("(s,l)",(int)FileName,(UINT64)&AsmResultSet),
 			NULL);
 	}
 	else
 	{
-		return (PyObject *)&_PyNone_Type;;
+		return (PyObject *)&_PyNone_Type;
 	}
 }
 

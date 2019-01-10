@@ -21,7 +21,8 @@ Disasm::Disasm(HANDLE hFile)
 	if (hMap == INVALID_HANDLE_VALUE)
 		throw "CreateFileMapping Error!";
 	DWORD MapFileAddr = (DWORD)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
-	ImageInfo=new CImageInfo(hFile);
+	ImageInfo=new CImageInfo();
+	ImageInfo->ReadImage(hFile); //TODO 加上判断
 
 	DisasmResult = new DISASM_RESULT[ImageInfo->GetSizeOfCode()];  //TODO 1、 改成有结果才申请内容可以节省内存 2、改成内存中代码段的总记录数
 	DisasmPoint = new DISASM_POINT;

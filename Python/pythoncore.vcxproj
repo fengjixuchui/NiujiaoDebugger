@@ -488,7 +488,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <TargetExt>.lib</TargetExt>
     <IncludePath>$(ProjectDir)\Include;$(ProjectDir)\PC;$(IncludePath)</IncludePath>
-    <OutDir>..\Build\Lib\</OutDir>
+    <OutDir>..\Build\Lib64\</OutDir>
     <IntDir>..\Build\Python\X64\Debug\</IntDir>
   </PropertyGroup>
   <ItemGroup Condition="$(VCInstallDir) != ''">

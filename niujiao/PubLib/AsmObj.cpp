@@ -10,10 +10,12 @@ PyObject * AsmObject_new(PyTypeObject * type, PyObject * args, PyObject * kwds)
 	self = (AsmObject *)type->tp_alloc(type, 0);
 	if (self != NULL) {
 		const char* AsmStr = 0;
+		UINT64 TmpPoint = 0;
 		SAsmResultSet* AsmResultSet = nullptr;
 		if (args && ((PyTupleObject*)args)->ob_base.ob_size ==2)
 		{
-			PyArg_ParseTuple(args, "si", &AsmStr, &AsmResultSet);
+			PyArg_ParseTuple(args, "sl", &AsmStr, &TmpPoint);
+			AsmResultSet = (SAsmResultSet*)TmpPoint;
 			self->AsmStr = PyUnicode_FromString(AsmStr);
 			if (AsmResultSet->m_SuccessRecord < 1)
 			{

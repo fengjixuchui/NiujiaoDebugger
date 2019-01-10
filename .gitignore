@@ -343,3 +343,6 @@ ASALocalRun/
 /output/niujiao_d.lib
 /output/niujiao_d_64.exp
 /output/niujiao_d_64.lib
+/Build/Lib64/DuiLib_Static_d.lib
+/Build/Lib64/python37_d.lib
+/Build/Lib64/vcruntime140.dll

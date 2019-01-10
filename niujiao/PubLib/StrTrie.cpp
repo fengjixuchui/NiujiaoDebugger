@@ -20,7 +20,7 @@ CStrTrie::~CStrTrie()
 	m_trieHead = nullptr;
 }
 
-int CStrTrie::TrieAddStr(char * str, const int value, const int func) const
+int CStrTrie::TrieAddStr(char * str, const UINT64 value, const UINT64 func) const
 {
 	STrieNode* TmpNode = m_trieHead;
 	char* TmpStr = str;
@@ -41,7 +41,7 @@ int CStrTrie::TrieAddStr(char * str, const int value, const int func) const
 	return 0;
 }
 
-bool CStrTrie::GetDataInTrie(char * index, int * value, int * func) const
+bool CStrTrie::GetDataInTrie(char * index, UINT64 * value, UINT64 * func) const
 {
 	if (index == nullptr || *index == 0x00) return false;
 	STrieNode* TmpNode = m_trieHead;

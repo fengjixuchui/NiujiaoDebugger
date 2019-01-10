@@ -155,9 +155,9 @@
     <EmbedManifest>false</EmbedManifest>
     <LibraryPath>$(LibraryPath)</LibraryPath>
     <IncludePath>$(ProjectDir);$(IncludePath)</IncludePath>
-    <OutDir>..\Build\Lib\</OutDir>
+    <OutDir>..\Build\Lib64\</OutDir>
     <IntDir>..\Build\DuiLib\X64\Debug\</IntDir>
-    <TargetName>$(ProjectName)_d_64</TargetName>
+    <TargetName>$(ProjectName)_d</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='UnicodeDebug|Win32'">
     <OutDir>.\Build\Debug_u\</OutDir>

@@ -74,7 +74,7 @@ PyObject * PEOptionalHeader_new(PyTypeObject * type, PyObject * args, PyObject *
 	PEOptionalHeader *self;
 	self = (PEOptionalHeader *)type->tp_alloc(type, 0);
 	if (self != NULL) {
-		optional_pe_header_64 * pe_optional_header = nullptr;
+		optional_pe_header * pe_optional_header = nullptr;
 		int Is32Image = 0;
 		if (args && ((PyTupleObject*)args)->ob_base.ob_size == 1)
 		{
@@ -82,70 +82,12 @@ PyObject * PEOptionalHeader_new(PyTypeObject * type, PyObject * args, PyObject *
 		}
 		if (pe_optional_header)
 		{
-			self->Magic=                             pe_optional_header->Magic ;
-			self->MajorLinkerVersion = 				 pe_optional_header->MajorLinkerVersion ;
-			self->MinorLinkerVersion = 				 pe_optional_header->MinorLinkerVersion ;
-			self->SizeOfCode = 						 pe_optional_header->SizeOfCode ;
-			self->SizeOfInitializedData = 			 pe_optional_header->SizeOfInitializedData ;
-			self->SizeOfUninitializedData = 		 pe_optional_header->SizeOfUninitializedData ;
-			self->AddressOfEntryPoint = 			 pe_optional_header->AddressOfEntryPoint ;
-			self->BaseOfCode = 						 pe_optional_header->BaseOfCode ;
-			self->BaseOfData = 						 pe_optional_header->BaseOfData ;
-			self->ImageBase = 						 pe_optional_header->ImageBase ;
-			self->SectionAlignment = 			     pe_optional_header->SectionAlignment ;
-			self->FileAlignment = 					 pe_optional_header->FileAlignment ;
-			self->MajorOperatingSystemVersion = 	 pe_optional_header->MajorOperatingSystemVersion ;
-			self->MinorOperatingSystemVersion = 	 pe_optional_header->MinorOperatingSystemVersion ;
-			self->MajorImageVersion = 				 pe_optional_header->MajorImageVersion ;
-			self->MinorImageVersion = 				 pe_optional_header->MinorImageVersion ;
-			self->MajorSubsystemVersion = 			 pe_optional_header->MajorSubsystemVersion ;
-			self->MinorSubsystemVersion = 			 pe_optional_header->MinorSubsystemVersion ;
-			self->Win32VersionValue = 				 pe_optional_header->Win32VersionValue ;
-			self->SizeOfImage = 					 pe_optional_header->SizeOfImage ;
-			self->SizeOfHeaders = 					 pe_optional_header->SizeOfHeaders ;
-			self->CheckSum = 						 pe_optional_header->CheckSum ;
-			self->Subsystem = 						 pe_optional_header->Subsystem ;
-			self->DllCharacteristics = 				 pe_optional_header->DllCharacteristics ;
-			self->SizeOfStackReserve = 				 pe_optional_header->SizeOfStackReserve ;
-			self->SizeOfStackCommit = 				 pe_optional_header->SizeOfStackCommit ;
-			self->SizeOfHeapReserve = 				 pe_optional_header->SizeOfHeapReserve ;
-			self->SizeOfHeapCommit = 				 pe_optional_header->SizeOfHeapCommit ;
-			self->LoaderFlags = 					 pe_optional_header->LoaderFlags ;
-			self->NumberOfRvaAndSizes = 			 pe_optional_header->NumberOfRvaAndSizes ;
+			memcpy(&(self->Magic), pe_optional_header, sizeof(OPTIONAL_PE_HEADER));
 			Py_DECREF(args);
 		}
 		else
 		{
-			self->Magic=0;                        
-			self->MajorLinkerVersion=0;
-			self->MinorLinkerVersion=0;
-			self->SizeOfCode=0;
-			self->SizeOfInitializedData=0;
-			self->SizeOfUninitializedData=0;
-			self->AddressOfEntryPoint=0;
-			self->BaseOfCode=0;
-			self->BaseOfData=0;
-			self->ImageBase=0;
-			self->SectionAlignment=0;
-			self->FileAlignment=0;
-			self->MajorOperatingSystemVersion=0;
-			self->MinorOperatingSystemVersion=0;
-			self->MajorImageVersion=0;
-			self->MinorImageVersion=0;
-			self->MajorSubsystemVersion=0;
-			self->MinorSubsystemVersion=0;
-			self->Win32VersionValue=0;
-			self->SizeOfImage=0;
-			self->SizeOfHeaders=0;
-			self->CheckSum=0;
-			self->Subsystem=0;
-			self->DllCharacteristics=0;
-			self->SizeOfStackReserve=0;
-			self->SizeOfStackCommit=0;
-			self->SizeOfHeapReserve=0;
-			self->SizeOfHeapCommit=0;
-			self->LoaderFlags=0;
-			self->NumberOfRvaAndSizes=0;
+			ZeroMemory(&(self->Magic), sizeof(OPTIONAL_PE_HEADER));
 		}
 	}
 	return (PyObject *)self;
@@ -160,10 +102,10 @@ PyObject * PEOptionalHeader_subscript(PEOptionalHeader * mp, PyObject * key)
 		{
 			switch (PEOptionalHeader_members[i].type)
 			{
-			case T_USHORT: return PyLong_FromLong(*(USHORT*)((int)mp + PEOptionalHeader_members[i].offset));
-			case T_UINT: return PyLong_FromLong(*(UINT*)((int)mp + PEOptionalHeader_members[i].offset));
-			case T_BYTE: return PyLong_FromLong(*(BYTE*)((int)mp + PEOptionalHeader_members[i].offset));
-			case T_ULONG: return PyLong_FromLong(*(ULONG*)((int)mp + PEOptionalHeader_members[i].offset));
+			case T_USHORT: return PyLong_FromLong(*(USHORT*)((UINT64)mp + PEOptionalHeader_members[i].offset));
+			case T_UINT: return PyLong_FromLong(*(UINT*)((UINT64)mp + PEOptionalHeader_members[i].offset));
+			case T_BYTE: return PyLong_FromLong(*(BYTE*)((UINT64)mp + PEOptionalHeader_members[i].offset));
+			case T_ULONG: return PyLong_FromLong(*(ULONG*)((UINT64)mp + PEOptionalHeader_members[i].offset));
 			}
 		}
 	}
@@ -175,23 +117,23 @@ PyObject * PEFormat_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 	PEFormat *self;
 	self = (PEFormat *)type->tp_alloc(type, 0);
 	if (self != NULL) {
-		int ImageInfo = 0;
-		int PeHeader = 0;
-		int PeOptionalHeader = 0;
+		UINT64 ImageInfo = 0;
+		UINT64 PeHeader = 0;
+		UINT64 PeOptionalHeader = 0;
 		int Is32Image = 1;
 		if (args&&((PyTupleObject*)args)->ob_base.ob_size>0)  //允许无参构造
 		{
-			PyArg_ParseTuple(args, "i", &ImageInfo);
-			PeHeader = (int)((CImageInfo*)ImageInfo)->GetPeHeader();
-			PeOptionalHeader = (int)((CImageInfo*)ImageInfo)->GetOptionalHeader();
+			PyArg_ParseTuple(args, "l", &ImageInfo);
+			PeHeader = (UINT64)((CImageInfo*)ImageInfo)->GetPeHeader();
+			PeOptionalHeader = (UINT64)((CImageInfo*)ImageInfo)->GetOptionalHeader();
 		}
-		self->PeHeader = (PEHeader *)PEHeaderType.tp_new(&PEHeaderType, Py_BuildValue("(i)", PeHeader), NULL);
+		self->PeHeader = (PEHeader *)PEHeaderType.tp_new(&PEHeaderType, Py_BuildValue("(l)", PeHeader), NULL);
 		if (self->PeHeader == NULL)
 		{
 			Py_DECREF(self);
 			return NULL;
 		}
-		self->PeOptionalHeader = (PEOptionalHeader *)PEOptionalHeaderType.tp_new(&PEOptionalHeaderType, Py_BuildValue("(i)", PeOptionalHeader), NULL);
+		self->PeOptionalHeader = (PEOptionalHeader *)PEOptionalHeaderType.tp_new(&PEOptionalHeaderType, Py_BuildValue("(l)", PeOptionalHeader), NULL);
 		if (self->PeHeader == NULL)
 		{
 			Py_DECREF(self);

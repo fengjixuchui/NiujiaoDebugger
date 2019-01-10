@@ -17,7 +17,7 @@ CAsm::CAsm()
 		m_strTrie = new CStrTrie();
 		for (int i = 0; i < (sizeof(gAsmInstruct) / sizeof(SAsmInstruct)); i++)
 		{
-			m_strTrie->TrieAddStr(gAsmInstruct[i].m_Mnemonic, int(gAsmInstruct[i].m_Operand), 0);
+			m_strTrie->TrieAddStr(gAsmInstruct[i].m_Mnemonic, UINT64(gAsmInstruct[i].m_Operand), 0);
 		}
 	}
 }
@@ -35,7 +35,7 @@ int CAsm::AsmFromStr(LPCTSTR asmStr, SAsmResultSet* asmResultSet)
 	if (SplitStr(AsmStr, &StructAsmStr) == false) return false ;
 
 	//获取已定义的助记符信息
-	int Addr = 0;
+	UINT64 Addr = 0;
 	m_strTrie->GetDataInTrie(StructAsmStr.m_Instruct, &Addr, nullptr);
 
 	SInstructFmt *InstructFmt = reinterpret_cast<SInstructFmt*>(Addr);
