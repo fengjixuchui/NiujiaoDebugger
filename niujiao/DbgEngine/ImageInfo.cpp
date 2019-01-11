@@ -1,5 +1,5 @@
 /*
-å®ç°PEæ–‡ä»¶æ ¼å¼çš„è§£æ
+ÊµÏÖPEÎÄ¼ş¸ñÊ½µÄ½âÎö
 */
 #include "stdafx.h"
 #include "ImageInfo.h"
@@ -72,12 +72,13 @@ DWORD CImageInfo::GetNumOfRVA() const
 }
 
 DWORD CImageInfo::GetVirtualAddress() const
-{	// è·å–ç¬¬ä¸€ä¸ªå¯æ‰§è¡Œæ®µçš„æŒ‡é’ˆ   å¯¹äºä¸€äº›è€Œå·²æ„é€ çš„PEæ–‡ä»¶å¯èƒ½ä¼šå¤±æ•ˆ
+{	// »ñÈ¡µÚÒ»¸ö¿ÉÖ´ĞĞ¶ÎµÄÖ¸Õë   ¶ÔÓÚÒ»Ğ©¶øÒÑ¹¹ÔìµÄPEÎÄ¼ş¿ÉÄÜ»áÊ§Ğ§
 	for (int i = 0; i < PeHeader.NumberOfSections; i++)
 	{
 		if ((PeSectionHeader + i)->Characteristics == 0x60000020)
 			return (PeSectionHeader + i)->VirtualAddress;
 	}
+	return 0;
 }
 
 DWORD CImageInfo::GetBaseOfCode() const
@@ -87,12 +88,13 @@ DWORD CImageInfo::GetBaseOfCode() const
 
 DWORD CImageInfo::GetBaseOfCodeInFile() const
 {
-	// è·å–ç¬¬ä¸€ä¸ªå¯æ‰§è¡Œæ®µçš„æŒ‡é’ˆ   å¯¹äºä¸€äº›è€Œå·²æ„é€ çš„PEæ–‡ä»¶å¯èƒ½ä¼šå¤±æ•ˆ
+	// »ñÈ¡µÚÒ»¸ö¿ÉÖ´ĞĞ¶ÎµÄÖ¸Õë   ¶ÔÓÚÒ»Ğ©¶øÒÑ¹¹ÔìµÄPEÎÄ¼ş¿ÉÄÜ»áÊ§Ğ§
 	for (int i = 0; i < PeHeader.NumberOfSections; i++)
 	{
 		if ((PeSectionHeader + i)->Characteristics == 0x60000020)
 			return (PeSectionHeader + i)->PointerToRawData;
 	}
+	return 0;
 }
 
 DWORD CImageInfo::GetSizeOfCode() const
@@ -119,7 +121,7 @@ DWORD CImageInfo::GetMemorySize() const
 {
 	SYSTEM_INFO si = { 0 };
 	GetSystemInfo(&si);
-	DWORD MemorySize = 1;//PEå¤´åœ¨æ®µä¸­æ²¡æœ‰ä½“ç°  åœ¨å†…å­˜ä¸­å ç”¨ä¸€ä¸ªé¡µé¢
+	DWORD MemorySize = 1;//PEÍ·ÔÚ¶ÎÖĞÃ»ÓĞÌåÏÖ  ÔÚÄÚ´æÖĞÕ¼ÓÃÒ»¸öÒ³Ãæ
 
 	for (int i = 0; i < PeHeader.NumberOfSections; i++)
 	{
@@ -163,14 +165,14 @@ DWORD CImageInfo::GetCharacteritic() const
 
 UINT64 CImageInfo::VoaToFoa(DWORD Voa) const
 {
-	//åˆ¤æ–­ Voa cå¤„äºå“ªä¸ªæ®µä¸Šé¢
+	//ÅĞ¶Ï Voa c´¦ÓÚÄÄ¸ö¶ÎÉÏÃæ
 	int i = GetNumberOfSections() - 1;
 	for (; i>-1  ; i--)
 	{
 		PE_SECTION_HEADER* TmpHeader = (PeSectionHeader + i);
 		if (Voa > TmpHeader->VirtualAddress || Voa== TmpHeader->VirtualAddress)
 		{
-			//TODO ç†è®ºä¸Šï¼Œæ®µåºå·å’Œåœ°å€æ˜¯é€’å¢å…³ç³»çš„ï¼Œæ‰€ä»¥å¯ä»¥è¿™æ ·å†™ã€‚é‚£å­˜ä¸å­˜åœ¨æ®µçš„åºå·å’Œåœ°å€å…³ç³»æ˜¯ä¹±åºçš„å‘¢ï¼Ÿ
+			//TODO ÀíÂÛÉÏ£¬¶ÎĞòºÅºÍµØÖ·ÊÇµİÔö¹ØÏµµÄ£¬ËùÒÔ¿ÉÒÔÕâÑùĞ´¡£ÄÇ´æ²»´æÔÚ¶ÎµÄĞòºÅºÍµØÖ·¹ØÏµÊÇÂÒĞòµÄÄØ£¿
 			UINT64 aa= (Voa - TmpHeader->VirtualAddress) + TmpHeader->PointerToRawData;
 			return aa;
 		}
@@ -179,7 +181,7 @@ UINT64 CImageInfo::VoaToFoa(DWORD Voa) const
 }
 
 DWORD CImageInfo::GetImportTable(char** FuncName,char** DllName,int Flag) const
-//0 é‡å¤´å¼€å§‹éå† 1 ç»§ç»­ä¸Šä¸€æ¬¡éå†
+//0 ÖØÍ·¿ªÊ¼±éÀú 1 ¼ÌĞøÉÏÒ»´Î±éÀú
 {
 	static int Num = 0;
 	if (Flag == 0) Num = 0;
@@ -198,17 +200,17 @@ DWORD CImageInfo::GetImportTable(char** FuncName,char** DllName,int Flag) const
 		}
 		else
 		{
-			//æ ¹æ®åºå·æŸ¥æ‰¾
+			//¸ù¾İĞòºÅ²éÕÒ
 			//ImportDirTable->ImportLookUpTableRVA = TblAddr->ImportLookUpTableRVA;
 			//ImportDirTable->ForwarderChain = TblAddr->ForwarderChain;
-			//æ ¹æ®åç§°æŸ¥æ‰¾
-			UINT64 TmpNameAddr = VoaToFoa(TblAddr->ImportAdressTableRVA) + (UINT64)MapFileAddr;  //å‡½æ•°åç§°æ€»è¡¨ pecoff 44
-			int FuncNum = 0; //å‡½æ•°æ€»ä¸ªæ•°
-			int NameLen = 0; //åç§°æ€»é•¿åº¦
+			//¸ù¾İÃû³Æ²éÕÒ
+			UINT64 TmpNameAddr = VoaToFoa(TblAddr->ImportAdressTableRVA) + (UINT64)MapFileAddr;  //º¯ÊıÃû³Æ×Ü±í pecoff 44
+			int FuncNum = 0; //º¯Êı×Ü¸öÊı
+			size_t NameLen = 0; //Ãû³Æ×Ü³¤¶È
 			while (*((UINT64*)TmpNameAddr + FuncNum))
 			{
 				UINT64 TmpAddr= VoaToFoa(*(UINT64*)TmpNameAddr) + (UINT64)MapFileAddr;
-				NameLen = NameLen + strlen((char*)TmpAddr + 2) + 1; //è¡¥ä¸Šæœ€åä¸€ä¸ªåç§°çš„é•¿åº¦
+				NameLen = NameLen + strlen((char*)TmpAddr + 2) + 1; //²¹ÉÏ×îºóÒ»¸öÃû³ÆµÄ³¤¶È
 				FuncNum++;
 			}		
 
@@ -216,7 +218,7 @@ DWORD CImageInfo::GetImportTable(char** FuncName,char** DllName,int Flag) const
 			*FuncName = (char*)malloc(NameLen);
 			memcpy(*FuncName, (char*)TmpNameAddr, NameLen);
 			
-			//è¿”å›dllåç§°
+			//·µ»ØdllÃû³Æ
 			TmpNameAddr = VoaToFoa(TblAddr->NameRVA) + (UINT64)MapFileAddr;
 			strcpy(*DllName, (char*)TmpNameAddr);
 			Num++;
@@ -255,9 +257,9 @@ bool CImageInfo::ReadImageFromFile(LPCTSTR fileName)
 {
 	if (fileName == nullptr || lstrlen(fileName) == 0)
 		return false;
-	//å°†å¥æŸ„æ˜ å°„è‡³å†…å­˜
+	//½«¾ä±úÓ³ÉäÖÁÄÚ´æ
 	if (hFile != 0)
-		CloseHandle(hFile); //å¤šæ¬¡æ‰“å¼€çš„æ—¶å€™ï¼Œå…³é—­ä¸Šä¸€æ¬¡é—ç•™çš„å¥æŸ„
+		CloseHandle(hFile); //¶à´Î´ò¿ªµÄÊ±ºò£¬¹Ø±ÕÉÏÒ»´ÎÒÅÁôµÄ¾ä±ú
 	hFile = CreateFile(fileName, GENERIC_READ, 0, nullptr, OPEN_EXISTING, NULL, nullptr);
 	if (hFile == INVALID_HANDLE_VALUE)
 		return false;
@@ -269,14 +271,29 @@ bool CImageInfo::ReadImageFromHandle(HANDLE tmpHandle)
 	bool ret = true;
 	if (tmpHandle == 0 || tmpHandle == INVALID_HANDLE_VALUE)
 		return false;
-	hMap = CreateFileMapping(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+	if (hMap != 0)
+		CloseHandle(hMap); //¶à´Î´ò¿ªµÄÊ±ºò£¬¹Ø±ÕÉÏÒ»´ÎÒÅÁôµÄÓ³ÉäµØÖ·
+	hMap = CreateFileMapping(tmpHandle, nullptr, PAGE_READONLY, 0, 0, nullptr);  
+	if (hMap == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+	if (MapFileAddr != nullptr)
+		UnmapViewOfFile(MapFileAddr); //¶à´Î´ò¿ªµÄÊ±ºò£¬¹Ø±ÕÉÏÒ»´ÎÒÅÁôµÄÓ³ÉäµØÖ·
 	MapFileAddr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
-	return GetImageInfo((UINT64)MapFileAddr);
+	if (MapFileAddr == nullptr)
+	{
+		CloseHandle(hMap);
+
+		hMap = nullptr;
+		return false;
+	}
+	return GetImageInfo(MapFileAddr);
 }
 
 bool CImageInfo::GetImageInfo(LPVOID PeAddr)
 {
-	//è¯»å–peheader
+	//¶ÁÈ¡peheader
 	UINT64 Tmp = (UINT64)PeAddr;
 	
 	DWORD32 PeHeaderPoint = *(DWORD32*)(Tmp + 0x3c);
@@ -296,7 +313,7 @@ bool CImageInfo::GetImageInfo(LPVOID PeAddr)
 	OptionalPeHeader.AddressOfEntryPoint = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
 	OptionalPeHeader.BaseOfCode = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
 
-	if (PeHeader.Characteristics & 0x100)//32ä½
+	if (PeHeader.Characteristics & 0x100)//32Î»
 	{
 		OptionalPeHeader.BaseOfData = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
 		OptionalPeHeader.ImageBase = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
@@ -320,7 +337,7 @@ bool CImageInfo::GetImageInfo(LPVOID PeAddr)
 	OptionalPeHeader.Subsystem = *(USHORT*)Tmp; Tmp += sizeof(USHORT);
 	OptionalPeHeader.DllCharacteristics = *(USHORT*)Tmp; Tmp += sizeof(USHORT);
 
-	if (PeHeader.Characteristics & 0x100)//32ä½
+	if (PeHeader.Characteristics & 0x100)//32Î»
 	{
 		OptionalPeHeader.SizeOfStackReserve = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
 		OptionalPeHeader.SizeOfStackCommit = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
@@ -337,12 +354,12 @@ bool CImageInfo::GetImageInfo(LPVOID PeAddr)
 	OptionalPeHeader.LoaderFlags = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
 	OptionalPeHeader.NumberOfRvaAndSizes = *(DWORD32*)Tmp; Tmp += sizeof(DWORD32);
 
-	//æ•°æ®ç›®å½•
+	//Êı¾İÄ¿Â¼
 	memcpy(&DataDirectory, (LPVOID)Tmp, sizeof(DATA_DIRECTORY)*DD_MAX_DIRECTORY_NAME_VALUE);
 	Tmp = Tmp + sizeof(DATA_DIRECTORY)*(DD_MAX_DIRECTORY_NAME_VALUE+1);
 	Tmp= Tmp + sizeof(DWORD) * 2;
 
-	//åŒºæ®µ
+	//Çø¶Î
 	//PeSectionHeader = (PE_SECTION_HEADER*)malloc(sizeof(PE_SECTION_HEADER)*PeHeader.NumberOfSections);
 	PeSectionHeader = new PE_SECTION_HEADER[PeHeader.NumberOfSections];
 	memcpy(PeSectionHeader, (LPVOID)Tmp, sizeof(PE_SECTION_HEADER)*PeHeader.NumberOfSections);
