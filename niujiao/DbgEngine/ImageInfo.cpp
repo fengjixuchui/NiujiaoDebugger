@@ -51,12 +51,12 @@ DWORD CImageInfo::GetDateTimeStamp() const
 }
 
 
-DWORD CImageInfo::GetAddressOfEntryPoint() const
+UINT CImageInfo::GetAddressOfEntryPoint() const
 {
 	return OptionalPeHeader.AddressOfEntryPoint;
 }
 
-DWORD64 CImageInfo::GetImageBase() const
+UINT64 CImageInfo::GetImageBase() const
 {
 	return OptionalPeHeader.ImageBase;
 }
@@ -71,6 +71,15 @@ DWORD CImageInfo::GetNumOfRVA() const
 	return OptionalPeHeader.NumberOfRvaAndSizes;
 }
 
+DWORD CImageInfo::GetVirtualAddress() const
+{	// 获取第一个可执行段的指针   对于一些而已构造的PE文件可能会失效
+	for (int i = 0; i < PeHeader.NumberOfSections; i++)
+	{
+		if ((PeSectionHeader + i)->Characteristics == 0x60000020)
+			return (PeSectionHeader + i)->VirtualAddress;
+	}
+}
+
 DWORD CImageInfo::GetBaseOfCode() const
 {
 	return OptionalPeHeader.BaseOfCode;
@@ -78,7 +87,12 @@ DWORD CImageInfo::GetBaseOfCode() const
 
 DWORD CImageInfo::GetBaseOfCodeInFile() const
 {
-	return PeSectionHeader->PointerToRawData;
+	// 获取第一个可执行段的指针   对于一些而已构造的PE文件可能会失效
+	for (int i = 0; i < PeHeader.NumberOfSections; i++)
+	{
+		if ((PeSectionHeader + i)->Characteristics == 0x60000020)
+			return (PeSectionHeader + i)->PointerToRawData;
+	}
 }
 
 DWORD CImageInfo::GetSizeOfCode() const
@@ -232,36 +246,52 @@ pe_header * CImageInfo::GetPeHeader()
 	return &PeHeader;
 }
 
-bool CImageInfo::ReadImage(UINT64 startAddr)
+bool CImageInfo::ReadImageFromMem(LPVOID startAddr)
 {
 	return GetImageInfo(startAddr);;
 }
 
-bool CImageInfo::ReadImage(LPCTSTR fileName)
+bool CImageInfo::ReadImageFromFile(LPCTSTR fileName)
 {
 	if (fileName == nullptr || lstrlen(fileName) == 0)
 		return false;
 	//将句柄映射至内存
+	if (hFile != 0)
+		CloseHandle(hFile); //多次打开的时候，关闭上一次遗留的句柄
 	hFile = CreateFile(fileName, GENERIC_READ, 0, nullptr, OPEN_EXISTING, NULL, nullptr);
 	if (hFile == INVALID_HANDLE_VALUE)
 		return false;
-	return ReadImage(hFile);
+	return ReadImageFromHandle(hFile);
 }
 
-bool CImageInfo::ReadImage(HANDLE tmpHandle)
+bool CImageInfo::ReadImageFromHandle(HANDLE tmpHandle)
 {
 	bool ret = true;
 	if (tmpHandle == 0 || tmpHandle == INVALID_HANDLE_VALUE)
 		return false;
-	hMap = CreateFileMapping(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+	if (hMap != 0)
+		CloseHandle(hMap); //多次打开的时候，关闭上一次遗留的映射地址
+	hMap = CreateFileMapping(tmpHandle, nullptr, PAGE_READONLY, 0, 0, nullptr);  
+	if (hMap == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+	if (MapFileAddr != nullptr)
+		UnmapViewOfFile(MapFileAddr); //多次打开的时候，关闭上一次遗留的映射地址
 	MapFileAddr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
-	return GetImageInfo((UINT64)MapFileAddr);
+	if (MapFileAddr == nullptr)
+	{
+		CloseHandle(hMap);
+		hMap = nullptr;
+		return false;
+	}
+	return GetImageInfo(MapFileAddr);
 }
 
-bool CImageInfo::GetImageInfo(UINT64 PeAddr)
+bool CImageInfo::GetImageInfo(LPVOID PeAddr)
 {
 	//读取peheader
-	UINT64 Tmp = PeAddr;
+	UINT64 Tmp = (UINT64)PeAddr;
 	
 	DWORD32 PeHeaderPoint = *(DWORD32*)(Tmp + 0x3c);
 

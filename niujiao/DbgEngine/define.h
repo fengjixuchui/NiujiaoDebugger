@@ -64,18 +64,15 @@ enum {
 	ASM_PREFIX_Repe_F3 = 0xF3,  
 };   //前缀类型枚举
 
-#define ZERO_OPERAND 0
-#define ONE_OPERAND 1
-#define TWO_OPERAND  2
-#define THREE_OPERAND 3
-#define FOUR_OPERAND 4
+
+enum {ZERO_OPERAND, ONE_OPERAND, TWO_OPERAND, THREE_OPERAND, FOUR_OPERAND};
 
 //操作数内容打包成一个整数 a占前三位 其余占5位
-#define PACK_OPERAND(OperandNum,FirstAddressType,FirstOperandType,d,e,f,g,h,i) (OperandNum+(FirstAddressType<<2)+(FirstOperandType<<7)+(d<<12)+(e<<17)+(f<<22)+(g<<27)+(h<<27)+(i<<27))
+#define PACK_OPERAND(a,b,c,d,e,f,g,h,i) ((UINT64)a+((UINT64)b<<3)+((UINT64)c<<8)+((UINT64)d<<13)+((UINT64)e<<18)+((UINT64)f<<23)+((UINT64)g<<28)+((UINT64)h<<33)+((UINT64)i<<38))
 //获取操作数数量
 #define GET_OPERAND_NUM(x)  (x&3)
-#define GET_ADDRES_TYPE(x,i) ((x>>(2+10*i))&31)
-#define GET_OPERAND_TYPE(x,i) ((x>>(7+10*i))&31)
+#define GET_ADDRES_TYPE(x,i) ((x>>(3+10*i))&0x1F)
+#define GET_OPERAND_TYPE(x,i) ((x>>(8+10*i))&0x1F)
 
 
 //寻址模式  intel手册 2512

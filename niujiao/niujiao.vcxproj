@@ -118,6 +118,7 @@
       <LargeAddressAware>true</LargeAddressAware>
       <OutputFile>$(SolutionDir)\output\$(TargetName)$(TargetExt)</OutputFile>
       <ProgramDatabaseFile>$(SolutionDir)\output\$(TargetName).pdb</ProgramDatabaseFile>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
     </Link>
     <PostBuildEvent>
       <Command>editbin /SUBSYSTEM:CONSOLE $(OutDir)\$(ProjectName).exe</Command>
@@ -140,6 +141,8 @@
       <AdditionalLibraryDirectories>$(SolutionDir)\Build\Lib64;</AdditionalLibraryDirectories>
       <OutputFile>$(SolutionDir)\output\$(TargetName)$(TargetExt)</OutputFile>
       <ProgramDatabaseFile>$(SolutionDir)\output\$(TargetName).pdb</ProgramDatabaseFile>
+      <LargeAddressAware>true</LargeAddressAware>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

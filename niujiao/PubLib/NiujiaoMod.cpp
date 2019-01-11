@@ -33,7 +33,7 @@ niujiao_readpe(PyObject *self, PyObject *args)
 
 	MultiByteToWideChar(CP_ACP, 0, FileName, strlen(FileName), tFileName, 32);
 	CImageInfo *ImageInfo =new  CImageInfo();
-	if (ImageInfo->ReadImage(tFileName) == false)
+	if (ImageInfo->ReadImageFromFile(tFileName) == false)
 		return (PyObject *)&_PyNone_Type;
 
 	PEFormat* pf = (PEFormat *)PEFormatType.tp_new(&PEFormatType, 

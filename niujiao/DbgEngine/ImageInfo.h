@@ -172,10 +172,11 @@ public :
 	DWORD GetSubSystem() const;
 	DWORD GetOptionalHeaderSize() const;
 	DWORD GetDateTimeStamp() const;
-	DWORD GetAddressOfEntryPoint() const;
-	DWORD64 GetImageBase() const;
+	UINT GetAddressOfEntryPoint() const;
+	UINT64 GetImageBase() const;
 	DWORD GetImageSize() const;
 	DWORD GetNumOfRVA() const;
+	DWORD GetVirtualAddress() const;
 	DWORD GetBaseOfCode() const;
 	DWORD GetBaseOfCodeInFile() const;
 	DWORD GetSizeOfCode() const;
@@ -197,9 +198,9 @@ public :
 	DWORD GetNumOfSections() const;
 	PE_SECTION_HEADER* GetSectionHeader() const;
 	pe_header* GetPeHeader();
-	bool ReadImage(UINT64 startAddr);
-	bool ReadImage(LPCTSTR FileName);
-	bool ReadImage(HANDLE hFile);
-	bool GetImageInfo(UINT64);
+	bool ReadImageFromMem(LPVOID startAddr);
+	bool ReadImageFromFile(LPCTSTR FileName);
+	bool ReadImageFromHandle(HANDLE hFile);
+	bool GetImageInfo(LPVOID startAddr);
 	optional_pe_header* GetOptionalHeader();
 };

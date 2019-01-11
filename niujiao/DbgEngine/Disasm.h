@@ -16,15 +16,15 @@ enum {
 };
 typedef struct disasm_result
 {
-	int* CodeMap;
-	DWORD CurrentAddr;
+	LPVOID CodeMap;
+	UINT64 CurFileOffset;
 	BYTE  MachineCode[16];
 	bool IsData; //可能是数据
-	int SIB_Prefix;
+	UINT SIB_Prefix;
 	DWORD PrefixState;
 	char Opcode[15];
-	int CurrentLen;
-	int OperandNum;
+	UINT CurrentLen;
+	UINT OperandNum;
 	char FirstOperand[64];
 	char SecondOperand[64];
 	char ThirdOperand[64];
@@ -34,39 +34,39 @@ typedef struct disasm_result
 }DISASM_RESULT;
 typedef struct disasm_point
 {
-	int PlatForm;
-	DWORD BaseOfCode;  //内存代码基址
-	DWORD BaseOfCodeInFile;  //文件代码基址
-	DWORD BaseOfImage; //内存映像基址 
-	DWORD EntryOfCode; //代码入口位置
-	DWORD FileStartOfCode; //文件中代码段开始位置
-	DWORD FileEndOfCode; //文件中代码段结束位置
+	CImageInfo* ImageInfo;
+	UINT PlatForm;
+	UINT VirtualAddress;  //内存代码基址
+	UINT64 BaseOfCodeInFile;  //文件代码基址
+	UINT64 BaseOfImage; //内存映像基址 
+	UINT64 FileStartOfCode; //文件中代码段开始位置
+	UINT64 FileEndOfCode; //文件中代码段结束位置
 	DWORD LenOfCode;//代码段长度
-	DWORD CurrentAddr;
-	DWORD TotalDisasmRecord;
-	DWORD MapFileAddr; //文件映射内存地址
+	UINT64 CurMemAddr;
+	UINT TotalDisasmRecord;
+	LPVOID MapFileAddr; //文件映射内存地址
 }DISASM_POINT;  //由于静态函数的缘故  使用额外一份独立的imageinfo 
 
 typedef struct str_map_code
 {
 	BYTE Num;  //操作码序号 没有用到，只为前期检索方便设置的
 	char OpStr[15];  //操作码伪指令字符串
-	DWORD64 Operand;  //操作数，最多四个。前三位为操作数数量，最大为四；后面每个地址类型与其操作数类型各占五位。总的有效位为43位。
+	UINT64 Operand;  //操作数，最多四个。前三位为操作数数量，最大为四；后面每个地址类型与其操作数类型各占五位。总的有效位为43位。
 	bool(*DisasmFunc)(DISASM_RESULT*, DISASM_POINT*,int* IsFinished); //操作码对应的处理函数指针
 }STR_MAP_CODE;
 
-typedef struct func_list
+typedef struct disasm_addr_queue
 {
-	DWORD Addr;
-	struct func_list* next;
-} FUNC_LIST;
+	LPVOID Addr;
+	struct disasm_addr_queue* next;
+} DISASM_ADDR_QUEUE;
 
 
 class Disasm
 {
 private:
-	DISASM_RESULT* DisasmResult; //基于地址索引的反汇编结果
-	DWORD *DisasmResultBySeq; //基于序号的反汇编结果
+	DISASM_RESULT** DisasmResult; //基于地址索引的反汇编结果
+	LPVOID *DisasmResultBySeq; //基于结果排序的反汇编结果
 
 	DISASM_POINT* DisasmPoint;
 	CImageInfo* ImageInfo;
@@ -75,23 +75,25 @@ private:
 public:
 	//反汇编单条指令
 	Disasm();
-	Disasm(HANDLE hFile);
-	Disasm(char* FileName);
 	~Disasm();
 	DISASM_RESULT* GetDisasmResult(DWORD) const;
 
 	DISASM_RESULT* GetDisasmResult() const;
-	DWORD* GetDisasmResultBySeq() const;
+	LPVOID* GetDisasmResultBySeq() const;
 	CImageInfo* GetImageInfo() const;
 	DWORD GetTotalDisasmRecord() const;
 	void IndexResultBySeq(DISASM_POINT* ImageInfo); //根据序号建立反汇编结果索引
 
 	/*链表操作函数 */
-	static bool FuncAdd(DWORD Addr);
-	static DWORD FuncPop();
-	static int GetFuncPoolSize();
+	static bool PushDisasmFuncAddr(LPVOID Addr);
+	static LPVOID PopDisasmFuncAddr();
+	static int GetDisasmFuncAddrCount();
 	/*链表操作函数 */
 
+	bool DisasmFromHandle(HANDLE hFile);
+	bool DisasmFromFile(LPCTSTR* FileName);
+	bool DisasmFromFile(char* FileName);
+	bool DisasmFromStr(char* Str);
 	bool DisasmFile();
 	bool TestPrintToFile() const;
 	static bool SetDataType(DISASM_POINT*  DisasmPoint, DWORD addr, int size);
