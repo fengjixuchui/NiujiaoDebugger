@@ -252,8 +252,8 @@ bool Disasm::DisasmFile()
 			}
 			if (SegmentIsFinished)
 			{
-				TestPrintToFile();
-				exit(0);
+				//TestPrintToFile();
+				//exit(0);
 			}
 		}
 	}
