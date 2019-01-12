@@ -68,6 +68,9 @@
                 <Button padding="10,10,0,5" bkcolor="0xffde4567" name="command" userdata="calc" text="计算器" height="25" width="80" bordersize="1" bordercolor="0x88ffffff" textcolor="0x88ffffff"></Button>
                 <Button padding="10,10,0,5" bkcolor="0xffde4567" name="command" userdata="cmd" text="命令行" height="25" width="80" bordersize="1" bordercolor="0x88ffffff" textcolor="0x88ffffff"></Button>
               </HorizontalLayout>
+              <HorizontalLayout height="50">
+                <Button padding="10,10,0,5" bkcolor="0xffde4567" name="sub_wnd" userdata="RunPyScript.xml" text="运行脚本" height="25" width="80" bordersize="1" bordercolor="0x88ffffff" textcolor="0x88ffffff"></Button>
+              </HorizontalLayout>
             </VerticalLayout>
             <VerticalLayout width="280" padding="30,5,0,0" bordercolor="0x44ffffff" bkcolor="0x44b0b0b0" bordersize="1">
               <Text text="设置" height="25" padding="130,10,0,0" textcolor="0x44ffffff"/>

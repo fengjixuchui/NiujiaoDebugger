@@ -14,6 +14,7 @@ typedef struct {
 PyObject * AsmObject_new(PyTypeObject * type, PyObject * args, PyObject * kwds);
 
 PyObject * AsmObject_subscript(AsmObject *mp, PyObject *key);
+ void AsmObject_dealloc(PyObject * ptr);
 static PyMappingMethods AsmObject_as_mapping = {
 	NULL, /*mp_length*/
 	(binaryfunc)AsmObject_subscript, /*mp_subscript*/
@@ -31,7 +32,7 @@ static PyTypeObject AsmObjectType = {
 	"AsmObject",
 	sizeof(AsmObject),
 	0,
-	0,                                  /* tp_dealloc */
+	AsmObject_dealloc,                                  /* tp_dealloc */
 	0,                                  /* tp_print */
 	0,                                  /* tp_getattr */
 	0,                                  /* tp_setattr */

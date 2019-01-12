@@ -59,3 +59,7 @@ PyObject * AsmObject_subscript(AsmObject * mp, PyObject * key)
 	}
 	return (PyObject *)&_PyNone_Type;
 }
+ void AsmObject_dealloc(PyObject *ptr)
+{
+	PyObject_Del(ptr);
+}

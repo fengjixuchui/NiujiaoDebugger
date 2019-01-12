@@ -196,6 +196,7 @@
     <ClInclude Include="DbgEngine\ImageInfo.h" />
     <ClInclude Include="niujiao.h" />
     <ClInclude Include="PubLib\AsmObj.h" />
+    <ClInclude Include="PubLib\DisasmObj.h" />
     <ClInclude Include="PubLib\NiujiaoMod.h" />
     <ClInclude Include="PubLib\PeObj.h" />
     <ClInclude Include="PubLib\PyInter.h" />
@@ -212,6 +213,7 @@
     <ClCompile Include="DbgEngine\ImageInfo.cpp" />
     <ClCompile Include="niujiao.cpp" />
     <ClCompile Include="PubLib\AsmObj.cpp" />
+    <ClCompile Include="PubLib\DisasmObj.cpp" />
     <ClCompile Include="PubLib\NiujiaoMod.cpp" />
     <ClCompile Include="PubLib\PeObj.cpp" />
     <ClCompile Include="PubLib\PyInter.cpp" />
@@ -259,6 +261,7 @@
     <Xml Include="..\output\registerwnd.xml">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
     </Xml>
+    <Xml Include="..\output\RunPyScript.xml" />
     <Xml Include="..\output\scrollbar.xml">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
     </Xml>

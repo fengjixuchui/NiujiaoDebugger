@@ -190,8 +190,38 @@ bool Disasm::DisasmFromFile(char * FileName)
 {
 	return false;
 }
-bool Disasm::DisasmFromStr(char * Str)
+bool Disasm::DisasmFromStr(char * Str, int platForm, int length, DISASM_RESULT * DisasmResult)
 {
+	if (DisasmResult == nullptr)
+		return false;
+
+	DisasmResult->CodeMap = (LPVOID)gOneByteCodeMap;
+	UINT64 StartDisasmAddr = (UINT64)Str;	
+	DISASM_POINT DisasmPoint;
+	ZeroMemory(&DisasmPoint, sizeof(DISASM_POINT));
+	DisasmPoint.CurMemAddr = (UINT64)Str;
+	int SegmentIsFinished = 0;
+	while (true) //循环解析一条指令：不定数量的前缀和其他内容
+	{
+		UCHAR code = *(UCHAR*)(DisasmPoint.CurMemAddr);
+		//先拷贝助记符  部分指令在函数里面修改助记符
+		if (gOneByteCodeMap[code].OpStr)
+			strcpy_s(DisasmResult->Opcode, gOneByteCodeMap[code].OpStr);
+		DisasmResult->CurrentLen = 0;
+		if (gOneByteCodeMap[code].DisasmFunc(DisasmResult, &DisasmPoint, &SegmentIsFinished))
+		{
+			if (DisasmResult->CurrentLen == 0)
+				DisasmResult->CurrentLen = UINT(DisasmPoint.CurMemAddr - StartDisasmAddr);//计算指令长度
+			memcpy(DisasmResult->MachineCode, (LPVOID)(StartDisasmAddr), DisasmResult->CurrentLen);//拷贝机器码
+			DisasmPoint.TotalDisasmRecord += 1;
+			if (code != 0x0f)  //此处只负责订正一字节操作码的擦作数  其它字节操作码在其实现部分修改
+			{
+				if (DisasmResult->OperandNum == 0)
+					DisasmResult->OperandNum = GET_OPERAND_NUM((gOneByteCodeMap[code].Operand)); //部分指令在函数内修改此参数
+			}
+			return true;
+		}
+	}
 	return false;
 }
 bool IsGernerl = false;
@@ -353,6 +383,46 @@ char * Disasm::GetNumbericType(DISASM_RESULT * DisasmResult, int base, int seg)
 	return NumbericTypeResult;
 }
 
+int Disasm::GetOperAndAddrSize(int platFrom, UINT64 Prefix, int * addrSize, int * OperandSize)
+{
+	//intel 82页
+	int tmpAddrSize = 0;
+	int tmpOperandSize = 0;
+	switch (platFrom)
+	{
+	case PLATFORM_16BIT:
+		tmpOperandSize = 16;
+		tmpAddrSize = 16;
+		if (Prefix&PREFIX_Oprand_Size_66)
+			tmpOperandSize = 32;
+		if (Prefix&PREFIX_Address_Size_67)
+			tmpAddrSize = 32;
+		break;
+	case PLATFORM_32BIT:
+		tmpOperandSize = 32;
+		tmpAddrSize = 32;
+		if (Prefix&PREFIX_Oprand_Size_66)
+			tmpOperandSize = 16;
+		if (Prefix&PREFIX_Address_Size_67)
+			tmpAddrSize = 16;
+		break;
+	case PLATFORM_64BIT:
+		if (Prefix&PREFIX_REX_W)
+			tmpOperandSize = 64;
+		else
+		{
+			if (Prefix&PREFIX_Oprand_Size_66)
+				tmpOperandSize = 16;
+			else
+				tmpOperandSize = 32;
+		}
+		if (Prefix&PREFIX_Address_Size_67)
+			tmpAddrSize = 32;
+		else
+			tmpAddrSize = 64;
+	}
+	return 0;
+}
 
 
 bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
@@ -376,9 +446,6 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 		case OT__z:
 		case OT__d:
 			base = 2;
-			break;
-		case OT__q:
-			base = 3;
 			break;
 		}
 		switch (GET_ADDRES_TYPE(OperandInt, i))
@@ -523,8 +590,17 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			break;
 		}
 		case AT__O:
-			sprintf(OperandArr[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(DWORD32*)DisasmPoint->CurMemAddr);
-			DisasmPoint->CurMemAddr += 4; //当前操作数
+			//这个类型只在 mov 中使用   如果是64位，则地址需要改成64位大小
+			if (DisasmPoint->PlatForm == PLATFORM_32BIT)
+			{
+				sprintf(OperandArr[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4; //当前操作数
+			}
+			else //64位
+			{
+				sprintf(OperandArr[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT64*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 8; //当前操作数
+			}
 			break;
 		}
 	}
@@ -1104,6 +1180,17 @@ bool Disasm::Disasm_pusha(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoin
 	else
 		strcpy_s(DisasmResult->Opcode, "pushad");
 	return true;
+}
+
+bool Disasm::Disasm_0xd5_0xd6(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*((UCHAR*)(DisasmPoint->CurMemAddr) + 1) == 0x0A)
+	{
+		DisasmPoint->CurMemAddr += 2;
+		return true;
+	}
+	else
+		return Disasm_reg_or_imm(DisasmResult, DisasmPoint, IsFinished);
 }
 
 bool Disasm::Disasm_popa(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)

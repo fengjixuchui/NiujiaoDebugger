@@ -93,13 +93,14 @@ public:
 	bool DisasmFromHandle(HANDLE hFile);
 	bool DisasmFromFile(LPCTSTR* FileName);
 	bool DisasmFromFile(char* FileName);
-	bool DisasmFromStr(char* Str);
+	bool DisasmFromStr(char* Str, int platForm, int length, DISASM_RESULT * DisasmResult);
 	bool DisasmFile();
 	bool TestPrintToFile() const;
 	static bool SetDataType(DISASM_POINT*  DisasmPoint, DWORD addr, int size);
 
 	static bool GernelDisasm(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static char* GetNumbericType(DISASM_RESULT*DisasmResult,int base,int seg=0);
+	static int GetOperAndAddrSize(int platFrom,UINT64 Prefix,int* addrSize,int* OperandSize);
 	static bool Disasm_reg_or_imm(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished); // 任意个寄存器或者任意个编码在指令中的操作数
 	static bool Disasm_ModRM(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static bool Disasm_SIB(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, PDWORD Len, char*);
@@ -112,6 +113,7 @@ public:
 	static bool Disasm_grp_shift(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static bool Disasm_no_else(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static bool Disasm_pusha(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
+	static bool Disasm_0xd5_0xd6(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static bool Disasm_popa(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static bool Disasm_pushf(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);
 	static bool Disasm_popf(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished);

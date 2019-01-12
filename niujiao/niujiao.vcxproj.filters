@@ -80,6 +80,9 @@
     <ClInclude Include="PubLib\AsmObj.h">
       <Filter>头文件\PubLib</Filter>
     </ClInclude>
+    <ClInclude Include="PubLib\DisasmObj.h">
+      <Filter>头文件\PubLib</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -113,6 +116,9 @@
       <Filter>源文件\PubLib</Filter>
     </ClCompile>
     <ClCompile Include="PubLib\AsmObj.cpp">
+      <Filter>源文件\PubLib</Filter>
+    </ClCompile>
+    <ClCompile Include="PubLib\DisasmObj.cpp">
       <Filter>源文件\PubLib</Filter>
     </ClCompile>
   </ItemGroup>
@@ -166,6 +172,9 @@
       <Filter>xml文件</Filter>
     </Xml>
     <Xml Include="..\output\testasm.xml">
+      <Filter>xml文件</Filter>
+    </Xml>
+    <Xml Include="..\output\RunPyScript.xml">
       <Filter>xml文件</Filter>
     </Xml>
   </ItemGroup>
