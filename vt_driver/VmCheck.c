@@ -6,6 +6,7 @@
 
 UINT64 StartVmm()
 {
+
 	// 0、检查处理器是否支持CPUID指令
 	if (asm_IsCpuSupportedCPUID() == 0)
 	{
@@ -69,6 +70,7 @@ UINT64 StartVmm()
 	sCr4->vmxe = 1; //设置vmxe位
 	asm_SetCR4(Cr4);
 	// 6、设置msr
+	asm_BreakPoint();
 	asm_GetMSR(IA32_FEATURE_CONTROL, &HighMsrResult, &LowMsrResult);
 	S_IA32_FEATURE_CONTROL* Ia32FeatureControlValue = (S_IA32_FEATURE_CONTROL*)&LowMsrResult; //高位不使用
 

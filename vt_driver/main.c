@@ -7,7 +7,7 @@ VT虚拟化驱动的实现
 #ifdef _WIN64
 #include "../intel64/intel64.h"
 #ifdef _DEBUG
-#pragma comment(lib,"..\\x64\\Debug\\intel64.lib")
+#pragma comment(lib,"..\\x64\\Debug\\vt_lib_64.lib")
 #else
 #pragma comment(lib,"..\\x64\\Release\\intel64.lib")
 #endif
