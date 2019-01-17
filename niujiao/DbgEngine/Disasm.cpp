@@ -199,6 +199,7 @@ bool Disasm::DisasmFromStr(char * Str, int platForm, int length, DISASM_RESULT *
 	UINT64 StartDisasmAddr = (UINT64)Str;	
 	DISASM_POINT DisasmPoint;
 	ZeroMemory(&DisasmPoint, sizeof(DISASM_POINT));
+	DisasmPoint.PlatForm = platForm;
 	DisasmPoint.CurMemAddr = (UINT64)Str;
 	int SegmentIsFinished = 0;
 	while (true) //循环解析一条指令：不定数量的前缀和其他内容
@@ -335,12 +336,12 @@ bool Disasm::TestPrintToFile() const
 		if (TmpResult->OperandNum == 0)
 			sprintf(tmp, "%s", TmpResult->Opcode);
 		else if (TmpResult->OperandNum == 1)
-			sprintf(tmp, "%s %s", TmpResult->Opcode, TmpResult->FirstOperand);
+			sprintf(tmp, "%s %s", TmpResult->Opcode, TmpResult->Operand[0]);
 		else if (TmpResult->OperandNum == 2)
-			sprintf(tmp, "%s %s,%s", TmpResult->Opcode, TmpResult->FirstOperand, TmpResult->SecondOperand);
+			sprintf(tmp, "%s %s,%s", TmpResult->Opcode, TmpResult->Operand[0], TmpResult->Operand[1]);
 		else if (TmpResult->OperandNum == 3)
-			sprintf(tmp, "%s %s,%s,%s", TmpResult->Opcode, TmpResult->FirstOperand,
-				TmpResult->SecondOperand, TmpResult->ThirdOperand);
+			sprintf(tmp, "%s %s,%s,%s", TmpResult->Opcode, TmpResult->Operand[0],
+				TmpResult->Operand[1], TmpResult->Operand[2]);
 		strcat(PrintData, tmp);
 		strcat(PrintData, "\n");
 		fwrite(PrintData, strlen(PrintData), 1, fp);
@@ -383,7 +384,7 @@ char * Disasm::GetNumbericType(DISASM_RESULT * DisasmResult, int base, int seg)
 	return NumbericTypeResult;
 }
 
-int Disasm::GetOperAndAddrSize(int platFrom, UINT64 Prefix, int * addrSize, int * OperandSize)
+int Disasm::GetOperAndAddrSize2(int platFrom, UINT64 Prefix, int * addrSize, int * OperandSize)
 {
 	//intel 82页
 	int tmpAddrSize = 0;
@@ -391,47 +392,437 @@ int Disasm::GetOperAndAddrSize(int platFrom, UINT64 Prefix, int * addrSize, int 
 	switch (platFrom)
 	{
 	case PLATFORM_16BIT:
-		tmpOperandSize = 16;
-		tmpAddrSize = 16;
+		tmpOperandSize = PLATFORM_16BIT;
+		tmpAddrSize = PLATFORM_16BIT;
 		if (Prefix&PREFIX_Oprand_Size_66)
-			tmpOperandSize = 32;
+			tmpOperandSize = PLATFORM_32BIT;
 		if (Prefix&PREFIX_Address_Size_67)
-			tmpAddrSize = 32;
+			tmpAddrSize = PLATFORM_32BIT;
 		break;
 	case PLATFORM_32BIT:
-		tmpOperandSize = 32;
-		tmpAddrSize = 32;
+		tmpOperandSize = PLATFORM_32BIT;
+		tmpAddrSize = PLATFORM_32BIT;
 		if (Prefix&PREFIX_Oprand_Size_66)
-			tmpOperandSize = 16;
+			tmpOperandSize = PLATFORM_16BIT;
 		if (Prefix&PREFIX_Address_Size_67)
-			tmpAddrSize = 16;
+			tmpAddrSize = PLATFORM_16BIT;
 		break;
 	case PLATFORM_64BIT:
 		if (Prefix&PREFIX_REX_W)
-			tmpOperandSize = 64;
+			tmpOperandSize = PLATFORM_64BIT;
 		else
 		{
 			if (Prefix&PREFIX_Oprand_Size_66)
-				tmpOperandSize = 16;
+				tmpOperandSize = PLATFORM_16BIT;
 			else
-				tmpOperandSize = 32;
+				tmpOperandSize = PLATFORM_32BIT;
 		}
 		if (Prefix&PREFIX_Address_Size_67)
-			tmpAddrSize = 32;
+			tmpAddrSize = PLATFORM_32BIT;
 		else
-			tmpAddrSize = 64;
+			tmpAddrSize = PLATFORM_64BIT;
+	}
+	if (addrSize) *addrSize = tmpAddrSize;
+	if (OperandSize) *OperandSize = tmpOperandSize;
+	return 0;
+}
+
+
+int Disasm::GetOperAndAddrSize(int platFrom, UINT64 Prefix, UINT64 OperandInt, int* addrSize, int* OperandSize)
+{
+	//首先检查操作数的宽度
+	if (addrSize)
+	{
+		for (int i = 0; i < GET_OPERAND_NUM(OperandInt); i++)
+		{
+			switch (GET_OPERAND_TYPE(OperandInt, i)) //可能会出现bug
+			{
+			case OT__b:
+				*addrSize = PLATFORM_8BIT;
+				break;
+			case OT__w:
+				*addrSize = PLATFORM_16BIT;
+				break;
+			case OT__v:
+			case OT__z:
+			case OT__d:
+				*addrSize = PLATFORM_32BIT;
+				break;
+			}
+
+		}
+		if (Prefix&PREFIX_Oprand_Size_66)
+			*addrSize += 1;
+		if (Prefix&PREFIX_REX_W)
+		{
+			*addrSize = PLATFORM_64BIT;
+		}
+	}
+	if (OperandSize)
+	{
+		switch (platFrom)
+		{
+		case PLATFORM_8BIT:
+			*OperandSize = PLATFORM_8BIT;
+			break;
+		case PLATFORM_16BIT:
+			if(Prefix&PREFIX_Oprand_Size_66)
+				*OperandSize = PLATFORM_32BIT;
+			else
+				*OperandSize = PLATFORM_16BIT;
+			break;
+		case PLATFORM_32BIT:
+			if (Prefix&PREFIX_Oprand_Size_66)
+				*OperandSize = PLATFORM_16BIT;
+			else
+				*OperandSize = PLATFORM_32BIT;
+			break;
+		case PLATFORM_64BIT:
+			*OperandSize = PLATFORM_32BIT;
+			break;
+		}
 	}
 	return 0;
 }
+
+
+
+int Disasm::GetSegReg(UINT64 OperandInt, int DefReg)
+{
+	if ((OperandInt&(PREFIX_Seg_ES_26 | PREFIX_Seg_CS_2E | PREFIX_Seg_SS_36 | PREFIX_Seg_DS_3E | PREFIX_Seg_FS_64 | PREFIX_Seg_GS_65)) == 0)
+		return DefReg;
+	if (OperandInt&PREFIX_Seg_ES_26)
+		return 0;
+	if (OperandInt&PREFIX_Seg_CS_2E)
+		return 1;
+	if (OperandInt&PREFIX_Seg_SS_36)
+		return 2;
+	if (OperandInt&PREFIX_Seg_DS_3E)
+		return 3;
+	if (OperandInt&PREFIX_Seg_FS_64)
+		return 4;
+	if (OperandInt&PREFIX_Seg_GS_65)
+		return 5;
+}
+
+bool Disasm::Disasm_GetEachOperand(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished)
+{
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	DWORD64 OperandInt = ((str_map_code*)DisasmResult->CodeMap + code)->Operand;
+
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = GET_OPERAND_NUM(OperandInt);
+
+	for (int i = 0; i < GET_OPERAND_NUM(OperandInt); i++)
+	{
+		switch (GET_ADDRES_TYPE(OperandInt, i))
+		{
+		case AT__I:
+			Disasm_GetImm(i, GET_OPERAND_TYPE(OperandInt, i),DisasmResult, DisasmPoint);
+			break;
+		}
+	}
+
+	return true;
+}
+
+bool Disasm::Disasm_GetImm(int pos,int type,DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint)
+{
+	switch (type)
+	{
+	case OT__b:
+		sprintf(DisasmResult->Operand[pos], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+		DisasmPoint->CurMemAddr += 1; //当前操作数
+		break;
+	}
+	return false;
+}
+
+bool Disasm::Disasm_no_operand(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_d4_d5(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*((UCHAR*)(DisasmPoint->CurMemAddr) + 1) == 0x0A)
+	{
+		DisasmPoint->CurMemAddr += 2;
+		DisasmResult->OperandNum = 0;
+		return true;
+	}
+	return Disasm_GetEachOperand(DisasmResult, DisasmPoint, IsFinished);
+}
+
+bool Disasm::Disasm_a6_a7(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr)  == 0xa6)
+	{
+		strcpy_s(DisasmResult->Opcode, "cmpsb");
+	}
+	else
+	{
+		if(DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "cmpsq");
+		else if(DisasmPoint->PlatForm==PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "cmpsw");
+		else
+			strcpy_s(DisasmResult->Opcode, "cmpsd");
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_6c_6d(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0x6c)
+	{
+		strcpy_s(DisasmResult->Opcode, "insb");
+	}
+	else
+	{
+		if(DisasmPoint->PlatForm==PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "insw");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "insw");
+			else
+				strcpy_s(DisasmResult->Opcode, "insd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_cc(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	strcpy_s(DisasmResult->Opcode, "int3");
+	return true;
+}
+
+bool Disasm::Disasm_cf(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	switch (DisasmPoint->PlatForm)
+	{
+	case PLATFORM_16BIT:strcpy_s(DisasmResult->Opcode, "iret"); break;
+	case PLATFORM_32BIT:
+		if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+			strcpy_s(DisasmResult->Opcode, "iret");
+		else
+			strcpy_s(DisasmResult->Opcode, "iretd");
+		break;
+	case PLATFORM_64BIT:
+		if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "iretq");
+		else
+			strcpy_s(DisasmResult->Opcode, "iretd");
+		break;
+	}
+	return true;
+}
+
+bool Disasm::Disasm_ac_ad(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xac)
+	{
+		strcpy_s(DisasmResult->Opcode, "lodsb");
+	}
+	else
+	{
+		char Opcode[][8] = { "lodsw","lodsd","lodsq" };
+		if(DisasmPoint->PlatForm==PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, Opcode[0]);
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, Opcode[0]);
+			else
+				strcpy_s(DisasmResult->Opcode, Opcode[2]);
+		}
+			strcpy_s(DisasmResult->Opcode, Opcode[2]);
+		// 32位 ad  lodsd      //lods dword ptr [esi]
+		// 32位 67 ad  lodsd      lods dword ptr [si]
+		// 32位 66 ad  lodsw      //lods word ptr [esi]
+		// 32位 66 67 ad  lodsw   lods word ptr [si]
+		// 64位 ad  lodsd 
+		// 64位 66 ad  lodsw 
+		// 64位 67 ad  lodsd     lods dword ptr [esi]
+		// 64位 66 67 ad  lods     lods word ptr [esi]
+		// 64位 REX.W ad  lodsq 
+		// 64位 REX.W 66 ad  lodsw 
+		// 64位 REX.W 66 67 ad  lodsw  lods word ptr [si]
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "lodsw");
+		else if(DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "lodsq");
+		else 
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "lodsw");
+			else
+				strcpy_s(DisasmResult->Opcode, "lodsd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_a4_a5(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xa4)
+	{
+		strcpy_s(DisasmResult->Opcode, "movsb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "movsw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "movsq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "movsw");
+			else
+				strcpy_s(DisasmResult->Opcode, "movsd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_6e_6f(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0x6e)
+	{
+		strcpy_s(DisasmResult->Opcode, "outsb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "outsw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "outsq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "outsw");
+			else
+				strcpy_s(DisasmResult->Opcode, "outsd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_aa_ab(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xaa)
+	{
+		strcpy_s(DisasmResult->Opcode, "stosb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "stosw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "stosq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "stosw");
+			else
+				strcpy_s(DisasmResult->Opcode, "stosd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_ae_af(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xae)
+	{
+		strcpy_s(DisasmResult->Opcode, "scasb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "scasw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "scasq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "scasw");
+			else
+				strcpy_s(DisasmResult->Opcode, "scasd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_set_prefix(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
+{
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	DisasmResult->PrefixState |= gOneByteCodeMap[code].Operand;
+	DisasmPoint->CurMemAddr += 1;
+	if (DisasmResult->PreStr[0])
+	{
+		strcpy_s(DisasmResult->Opcode, "illegal instruction");
+		return true;
+	}
+	switch (code)
+	{
+	case 0xF0:strcpy_s(DisasmResult->PreStr, "lock"); break;
+	case 0xF2:strcpy_s(DisasmResult->PreStr, "repne"); break;
+	case 0xF3:strcpy_s(DisasmResult->PreStr, "rep"); break;
+	}
+	return false;
+}
+bool Disasm::Disasm_ac_a4_6e_9d_aa_ae(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 1;
+	int regSize = DisasmPoint->PlatForm;
+	int OperandSize = 0;
+	if (DisasmResult->PrefixState&PREFIX_Address_Size_67) //寄存器宽度提升
+		if(DisasmPoint->PlatForm!=PLATFORM_16BIT)
+			regSize -= 1;
+		else
+			regSize += 1;
+	sprintf(DisasmResult->Operand[0], "%s %s[%s]", gNumbericType[OperandSize],gSegRegStr[GetSegReg(DisasmResult->PrefixState,3)], gRegister[regSize*RG__MAX+6]);
+	return true;
+}
+
+
+
+
+
+
 
 
 bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
 	DWORD64 OperandInt = ((str_map_code*)DisasmResult->CodeMap + code)->Operand;
-	char *OperandArr[] = { DisasmResult->FirstOperand,DisasmResult->SecondOperand, DisasmResult->ThirdOperand , DisasmResult->ForthOperand };
 	int base = 0;
 	DisasmPoint->CurMemAddr += 1; //OpCode 字节
+	int addrSize = 0;
+	int operandSize = 0;
+	GetOperAndAddrSize(DisasmPoint->PlatForm,DisasmResult->PrefixState, OperandInt, &addrSize, &operandSize);
 	for (int i = 0; i < GET_OPERAND_NUM(OperandInt); i++)
 	{
 		switch (GET_OPERAND_TYPE(OperandInt, i)) //可能会出现bug
@@ -451,41 +842,41 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 		switch (GET_ADDRES_TYPE(OperandInt, i))
 		{
 		case AT__X:  //DS:rSI 寻址
-			sprintf(OperandArr[i], "%s[%s]", GetNumbericType(DisasmResult, base), gRegister[RG__SI + DisasmPoint->PlatForm * RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s[%s]", GetNumbericType(DisasmResult, addrSize), gRegister[RG__SI + operandSize * RG__MAX]);
 			break;
 		case AT__Y:  //ES:rDI 寻址
-			sprintf(OperandArr[i], "%s[%s]", GetNumbericType(DisasmResult, base, PREFIX_Seg_ES_26), gRegister[RG__DI + DisasmPoint->PlatForm * RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s[%s]", GetNumbericType(DisasmResult, addrSize, PREFIX_Seg_ES_26), gRegister[RG__DI + operandSize * RG__MAX]);
 			break;
 		case AT__REG8:
-			sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i)]);
+			sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i)]);
 			break;
 		case AT_XX:
-			sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + RG__MAX]);
 			break;
 		case AT_eXX:
 		case AT_rXX:
 			base = 2;
 			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
-				sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + (base - 1) * RG__MAX]);
+				sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + (base - 1) * RG__MAX]);
 			else
-				sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + base * RG__MAX]);
+				sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + base * RG__MAX]);
 			break;
 		case AT__I:
 			switch (GET_OPERAND_TYPE(OperandInt, i))
 			{
 			case OT__b:
 				if(*(UCHAR*)DisasmPoint->CurMemAddr&0x80)
-					sprintf(OperandArr[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr^0xFF)+1);
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr^0xFF)+1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 1; //当前操作数
 				break;
 			case OT__w:
 			OPERAND_TWO:
 				if(*(USHORT*)DisasmPoint->CurMemAddr&0x8000)
-					sprintf(OperandArr[i], "-0x%X", (*(USHORT*)DisasmPoint->CurMemAddr^0xFFFF)+1);
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(USHORT*)DisasmPoint->CurMemAddr^0xFFFF)+1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(USHORT*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%X", *(USHORT*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 2; //当前操作数
 				break;
 			case OT__d:
@@ -494,9 +885,9 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 
 			OPERAND_FOUR:
 				if(*(DWORD32*)DisasmPoint->CurMemAddr&0x80000000)
-					sprintf(OperandArr[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFF) + 1);
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 4; //当前操作数
 				break;
 			case OT__q:
@@ -504,9 +895,9 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 					goto OPERAND_FOUR;
 			OPERAND_EIGHT:
 				if (*(DWORD64*)DisasmPoint->CurMemAddr & 0x8000000000000000)
-					sprintf(OperandArr[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
+					sprintf(DisasmResult->Operand[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%llX", *(DWORD64*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%llX", *(DWORD64*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 8; //当前操作数
 				break;
 			case OT__z:
@@ -570,13 +961,13 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			switch (DisasmPoint->PlatForm)
 			{
 			case PLATFORM_16BIT:
-				sprintf(OperandArr[i], "%04X", (USHORT)(CurrentAddr + Offset));
+				sprintf(DisasmResult->Operand[i], "%04X", (USHORT)(CurrentAddr + Offset));
 				break;
 			case PLATFORM_32BIT:
-				sprintf(OperandArr[i], "%08X", (UINT)(CurrentAddr + Offset));
+				sprintf(DisasmResult->Operand[i], "%08X", (UINT)(CurrentAddr + Offset));
 				break;
 			case PLATFORM_64BIT:
-				sprintf(OperandArr[i], "%016llX", CurrentAddr + Offset);
+				sprintf(DisasmResult->Operand[i], "%016llX", CurrentAddr + Offset);
 				break;
 			}
 			//将当前地址加入待解析地址中
@@ -593,12 +984,12 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			//这个类型只在 mov 中使用   如果是64位，则地址需要改成64位大小
 			if (DisasmPoint->PlatForm == PLATFORM_32BIT)
 			{
-				sprintf(OperandArr[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT*)DisasmPoint->CurMemAddr);
+				sprintf(DisasmResult->Operand[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 4; //当前操作数
 			}
 			else //64位
 			{
-				sprintf(OperandArr[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT64*)DisasmPoint->CurMemAddr);
+				sprintf(DisasmResult->Operand[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT64*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 8; //当前操作数
 			}
 			break;
@@ -614,8 +1005,6 @@ bool Disasm::Disasm_ModRM(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoin
 	DisasmPoint->CurMemAddr += 1; //Opcode 字节
 
 	int base = 0;
-	char* OperandArr[] = { DisasmResult->FirstOperand, DisasmResult->SecondOperand,DisasmResult->ThirdOperand,DisasmResult->ForthOperand }; //方便循环操作
-
 		//解析ModRM字节
 	UCHAR ModRMByte = *(UCHAR*)DisasmPoint->CurMemAddr;
 	DisasmPoint->CurMemAddr += 1;  //ModRm 字节
@@ -692,7 +1081,7 @@ LOOP_OUT:
 		switch (GET_ADDRES_TYPE(((str_map_code*)DisasmResult->CodeMap + code)->Operand, i))
 		{
 		case AT__G: //reg:通用寄存器
-				sprintf(OperandArr[i], "%s", gRegister[((ModRMByte & 0b111000) >> 3) + (base + OperandPrefix) * RG__MAX]);
+				sprintf(DisasmResult->Operand[i], "%s", gRegister[((ModRMByte & 0b111000) >> 3) + (base + OperandPrefix) * RG__MAX]);
 				break;
 		case AT__I:  //立即数
 			switch (base)
@@ -700,36 +1089,36 @@ LOOP_OUT:
 			case 0:
 BBB_0:
 				if (*(UCHAR*)DisasmPoint->CurMemAddr & 0x80)
-					sprintf(OperandArr[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 1;
 				break;
 			case 1:
 				if (OperandPrefix<0) goto BBB_0;
 BBB_1:
 				if (*(USHORT*)DisasmPoint->CurMemAddr & 0x8000)
-					sprintf(OperandArr[i], "-0x%X", (*(USHORT*)DisasmPoint->CurMemAddr ^ 0xFFFF) + 1);
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(USHORT*)DisasmPoint->CurMemAddr ^ 0xFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(USHORT*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%X", *(USHORT*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 2;
 				break;
 			case 2:
 				if (OperandPrefix < 0) goto BBB_1;
 BBB_2:
 				if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
-					sprintf(OperandArr[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFF) + 1);
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 4;
 				break;
 			case 3:
 				if (OperandPrefix < 0) goto BBB_2;
 BBB_3:
 				if (*(DWORD64*)DisasmPoint->CurMemAddr & 0x8000000000000000)
-					sprintf(OperandArr[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
+					sprintf(DisasmResult->Operand[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%llX", *(DWORD64*)DisasmPoint->CurMemAddr);
+					sprintf(DisasmResult->Operand[i], "0x%llX", *(DWORD64*)DisasmPoint->CurMemAddr);
 				DisasmPoint->CurMemAddr += 8;
 				break;
 			}
@@ -743,15 +1132,15 @@ BBB_3:
 				{
 				case 0b100://SIB
 					Disasm_SIB(DisasmResult, DisasmPoint, &len, SibStr);
-					sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
 					DisasmPoint->CurMemAddr += len;
 					break;
 				case 0b101:
-					sprintf((char*)*(OperandArr + i), "%s[0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), *(DWORD32*)DisasmPoint->CurMemAddr);
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), *(DWORD32*)DisasmPoint->CurMemAddr);
 					DisasmPoint->CurMemAddr += 4;  //32位偏移字节
 					break;
 				default:
-					sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm * RG__MAX]);
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm * RG__MAX]);
 				}
 				break;
 			case 0b01000000:
@@ -761,19 +1150,19 @@ BBB_3:
 					Disasm_SIB(DisasmResult, DisasmPoint, &len, SibStr);
 					DisasmPoint->CurMemAddr += len;
 					if ((SIBByte & 0b111) == 0b0101) //SIB字节包含偏移则 此处不需要加偏移
-						sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
 					else
 						if(*(UCHAR*)DisasmPoint->CurMemAddr&0x80)
-							sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (*(UCHAR*)DisasmPoint->CurMemAddr^0xFF)+1);
+							sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (*(UCHAR*)DisasmPoint->CurMemAddr^0xFF)+1);
 						else
-							sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurMemAddr);
+							sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurMemAddr);
 						DisasmPoint->CurMemAddr += 1;
 					break;
 				default:
 					if (*(UCHAR*)DisasmPoint->CurMemAddr & 0x80)
-						sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
 					else
-						sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(UCHAR*)DisasmPoint->CurMemAddr);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(UCHAR*)DisasmPoint->CurMemAddr);
 					DisasmPoint->CurMemAddr += 1;// 8位偏移字节
 				}
 				break;
@@ -784,35 +1173,35 @@ BBB_3:
 					Disasm_SIB(DisasmResult, DisasmPoint, &len, SibStr);
 					DisasmPoint->CurMemAddr += len;
 					if ((SIBByte & 0b111) == 0b0101) //SIB字节包含偏移则 此处不需要加偏移
-						sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
 					else
 						if(base==0)
 						{
 							if(*(UCHAR*)DisasmPoint->CurMemAddr&0xFF)
-								sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (0xFF^*(UCHAR*)DisasmPoint->CurMemAddr)+1);
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (0xFF^*(UCHAR*)DisasmPoint->CurMemAddr)+1);
 							else
-								sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurMemAddr);
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurMemAddr);
 							DisasmPoint->CurMemAddr += 1;
 						}
 						else if(base==2)
 						{
 							if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
-								sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (0xFFFFFFFF^*(DWORD32*)DisasmPoint->CurMemAddr)+1);
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (0xFFFFFFFF^*(DWORD32*)DisasmPoint->CurMemAddr)+1);
 							else
-								sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(DWORD32*)DisasmPoint->CurMemAddr);
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(DWORD32*)DisasmPoint->CurMemAddr);
 							DisasmPoint->CurMemAddr += 4;
 						}
 					break;
 				default:
 					if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
-						sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX],(0xFFFFFFFF^ *(DWORD32*)DisasmPoint->CurMemAddr)+1);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX],(0xFFFFFFFF^ *(DWORD32*)DisasmPoint->CurMemAddr)+1);
 					else
-					sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(DWORD32*)DisasmPoint->CurMemAddr);
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(DWORD32*)DisasmPoint->CurMemAddr);
 					DisasmPoint->CurMemAddr += 4;  //32位偏移字节
 				}
 				break;
 			case 0b11000000:
-				sprintf((char*)*(OperandArr + i), "%s", gRegister[(ModRMByte & 0x7) + (base + OperandPrefix) * RG__MAX]);
+				sprintf((char*)*(DisasmResult->Operand + i), "%s", gRegister[(ModRMByte & 0x7) + (base + OperandPrefix) * RG__MAX]);
 				break;
 			}
 			break;
@@ -820,7 +1209,7 @@ BBB_3:
 		case AT__W: break; //xmm ymm sib内存
 		case AT__U: break; //rm:xmm ymm
 		case AT__R: break; //rm:通用寄存器
-			sprintf(OperandArr[i], "%s", gRegister[(ModRMByte & 0b111) + (base + OperandPrefix) * RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s", gRegister[(ModRMByte & 0b111) + (base + OperandPrefix) * RG__MAX]);
 			break;
 		case AT__Q: break; // xmm ymm sib内存
 		case AT__C: break; //reg:控制寄存器
@@ -834,17 +1223,17 @@ BBB_3:
 				//TODO 非法操作
 				break;
 			default:
-				sprintf(OperandArr[i], "cr%d", ModRMByte & 0b111);
+				sprintf(DisasmResult->Operand[i], "cr%d", ModRMByte & 0b111);
 				break;
 			}
 			break;
 		case AT__D: break; //reg:调试寄存器
-			sprintf(OperandArr[i], "dr%d", ModRMByte & 0b111);
+			sprintf(DisasmResult->Operand[i], "dr%d", ModRMByte & 0b111);
 			break;
 		case AT__N: break; //rm:xmm ymm
 		case AT__P: break; //reg: xmm ymm
 		case AT__S: break; //reg 段寄存器
-			sprintf(OperandArr[i], "%s", gSegmentRegister[ModRMByte & 0b111]);
+			sprintf(DisasmResult->Operand[i], "%s", gSegmentRegister[ModRMByte & 0b111]);
 			break;
 		}
 
@@ -1039,7 +1428,7 @@ bool Disasm::Disasm_RexPrefix(DISASM_RESULT * DisasmResult, DISASM_POINT*  Disas
 	{
 		UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
 		DWORD64 OperandInt = gOneByteCodeMap[code].Operand;
-		sprintf(DisasmResult->FirstOperand, "%s", gRegister[GET_OPERAND_TYPE(OperandInt, 0) + DisasmPoint->PlatForm*RG__MAX]);
+		sprintf(DisasmResult->Operand[0], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, 0) + DisasmPoint->PlatForm*RG__MAX]);
 		DisasmPoint->CurMemAddr += 1;
 		return true;
 	}
@@ -1069,13 +1458,6 @@ bool Disasm::Disasm_ret(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint,
 }
 
 
-bool Disasm::Disasm_set_prefix(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
-{
-	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
-	DisasmResult->PrefixState |= gOneByteCodeMap[code].Operand;
-	DisasmPoint->CurMemAddr += 1;
-	return false;
-}
 bool Disasm::Disasm_grp_c6_c7(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
@@ -1147,30 +1529,25 @@ bool Disasm::Disasm_grp_shift(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 	case 0xc0:
 	case 0xc1:
 		if (*(UCHAR*)DisasmPoint->CurMemAddr & 0x80)
-			sprintf_s(DisasmResult->SecondOperand, "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
+			sprintf_s(DisasmResult->Operand[1], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
 		else
-			sprintf_s(DisasmResult->SecondOperand, "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+			sprintf_s(DisasmResult->Operand[1], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
 		DisasmPoint->CurMemAddr += 1;
 		break;
 		//reg 1
 	case 0xd0:
 	case 0xd1:
-		sprintf_s(DisasmResult->SecondOperand, "1");
+		sprintf_s(DisasmResult->Operand[1], "1");
 		break;
 		//reg cl
 	case 0xd2:
 	case 0xd3:
-		sprintf_s(DisasmResult->SecondOperand, "%s", gRegister[RG8__CL]);
+		sprintf_s(DisasmResult->Operand[1], "%s", gRegister[RG8__CL]);
 		break;
 	}
 	return true;
 }
 
-bool Disasm::Disasm_no_else(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
-{
-	DisasmPoint->CurMemAddr += 1;
-	return true;
-}
 
 bool Disasm::Disasm_pusha(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
@@ -1205,7 +1582,7 @@ bool Disasm::Disasm_popa(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint
 
 bool Disasm::Disasm_pushf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	char Opcode[][7] = { "pushf","pushfd","pushfq" };
+	char Opcode[][7] = { "","pushf","pushfd","pushfq" };
 	strcpy_s(DisasmResult->Opcode, Opcode[DisasmPoint->PlatForm]);
 	DisasmPoint->CurMemAddr += 1;
 	return true;
@@ -1213,7 +1590,7 @@ bool Disasm::Disasm_pushf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoin
 
 bool Disasm::Disasm_popf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	char Opcode[][7] = { "popf","popfd","popfq" };
+	char Opcode[][7] = { "","popf","popfd","popfq" };
 	strcpy_s(DisasmResult->Opcode, Opcode[DisasmPoint->PlatForm]);
 	DisasmPoint->CurMemAddr += 1;
 	return true;
@@ -1236,12 +1613,12 @@ bool Disasm::Disasm_grp_f6_f7(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 		if (code == 0xf6)//BYTE
 		{
 			char c = *(char*)DisasmPoint->CurMemAddr;
-			sprintf(DisasmResult->SecondOperand, "0x%X", c); //TODO 负数优化
+			sprintf(DisasmResult->Operand[1], "0x%X", c); //TODO 负数优化
 			DisasmPoint->CurMemAddr += 1;
 		}
 		else
 		{
-			sprintf(DisasmResult->SecondOperand, "0x%X", *(int*)DisasmPoint->CurMemAddr);
+			sprintf(DisasmResult->Operand[1], "0x%X", *(int*)DisasmPoint->CurMemAddr);
 			DisasmPoint->CurMemAddr += 4;
 		}
 		break;
@@ -1257,11 +1634,11 @@ bool Disasm::Disasm_grp_f6_f7(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 		DisasmResult->OperandNum = 2;
 		if (code == 0xF6)
 		{
-			strcpy_s(DisasmResult->SecondOperand, (char*)gRegister[RG8__AL]);
+			strcpy_s(DisasmResult->Operand[1], (char*)gRegister[RG8__AL]);
 		}
 		else
 		{
-			strcpy_s(DisasmResult->SecondOperand, (char*)gRegister[RG__AX + DisasmPoint->PlatForm*RG__MAX]);
+			strcpy_s(DisasmResult->Operand[1], (char*)gRegister[RG__AX + DisasmPoint->PlatForm*RG__MAX]);
 		}
 		break;
 	}
@@ -1287,8 +1664,9 @@ bool Disasm::Disasm_int(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint,
 	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (code == 0xcc)
 	{
-		sprintf(DisasmResult->FirstOperand, "0x03");
+		sprintf(DisasmResult->Operand[0], "0x03");
 		DisasmPoint->CurMemAddr += 1;
+		DisasmResult->OperandNum = 1;
 	}
 	else
 	{
@@ -1367,10 +1745,10 @@ bool Disasm::Disasm_ESC_0xd8(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 	if (ModRmByte > 0xBF)
 	{
 		strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-		strcpy_s(DisasmResult->FirstOperand, "st");
+		strcpy_s(DisasmResult->Operand[0], "st");
 		char tmp[8] = { 0 };
 		sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-		strcpy_s(DisasmResult->SecondOperand, tmp);
+		strcpy_s(DisasmResult->Operand[1], tmp);
 		DisasmPoint->CurMemAddr += 2;
 		DisasmResult->OperandNum = 2;
 	}
@@ -1396,10 +1774,10 @@ bool Disasm::Disasm_ESC_0xd9(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		case 0xc8:case 0xc9:case 0xca:case 0xcb:case 0xcc:case 0xcd:case 0xce:case 0xcf:
 		{
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmResult->OperandNum = 2;
 			break;
 		}
@@ -1514,10 +1892,10 @@ bool Disasm::Disasm_ESC_0xda(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		else
 		{
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmResult->OperandNum = 2;
 
 		}
@@ -1552,10 +1930,10 @@ bool Disasm::Disasm_ESC_0xdb(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		else
 		{
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmResult->OperandNum = 2;
 
 		}
@@ -1578,10 +1956,10 @@ bool Disasm::Disasm_ESC_0xdc(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 	{
 		char OpCode[][8] = { "fadd" , "fmul" , "" , "" , "fsubr" , "fsub" , "fdivr" , "fdiv" , };
 		strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-		strcpy_s(DisasmResult->SecondOperand, "st");
+		strcpy_s(DisasmResult->Operand[1], "st");
 		char tmp[8] = { 0 };
 		sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-		strcpy_s(DisasmResult->FirstOperand, tmp);
+		strcpy_s(DisasmResult->Operand[0], tmp);
 		DisasmPoint->CurMemAddr += 2;
 		DisasmResult->OperandNum = 2;
 	}
@@ -1604,10 +1982,10 @@ bool Disasm::Disasm_ESC_0xdd(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
 		char tmp[8] = { 0 };
 		sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-		strcpy_s(DisasmResult->FirstOperand, tmp);
+		strcpy_s(DisasmResult->Operand[0], tmp);
 		if (ModRmByte & 0xE0)
 		{
-			strcpy_s(DisasmResult->SecondOperand, "st");
+			strcpy_s(DisasmResult->Operand[1], "st");
 			DisasmResult->OperandNum = 2;
 		}
 		else
@@ -1640,10 +2018,10 @@ bool Disasm::Disasm_ESC_0xde(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		{
 			char OpCode[][8] = { "faddp" , "fmulp" , "" , "" , "fsubrp" , "fsubp" , "fdivrp" , "fdivp" , };
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmPoint->CurMemAddr += 2;
 			DisasmResult->OperandNum = 2;
 		}
@@ -1673,10 +2051,10 @@ bool Disasm::Disasm_ESC_0xdf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 				strcpy_s(DisasmResult->Opcode, "fucomip");
 			else if (ModRmByte & 0xF0)
 				strcpy_s(DisasmResult->Opcode, "fcomip");
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmPoint->CurMemAddr += 2;
 			DisasmResult->OperandNum = 2;
 		}
@@ -1704,6 +2082,65 @@ bool Disasm::Disasm_two_opcode(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 	return true;
 }
 
+bool Disasm::Disasm_Exception(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_0x98(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	switch (DisasmPoint->PlatForm)
+	{
+	case PLATFORM_16BIT: strcpy_s(DisasmResult->Opcode, "cbw"); break;
+	case PLATFORM_32BIT: strcpy_s(DisasmResult->Opcode, "cwde"); break;
+	case PLATFORM_64BIT: 
+		if(DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "cdqe");
+		else
+			strcpy_s(DisasmResult->Opcode, "cwde");
+		break;
+	}
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_0x99(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	switch (DisasmPoint->PlatForm)
+	{
+	case PLATFORM_16BIT: strcpy_s(DisasmResult->Opcode, "cwd"); break;
+	case PLATFORM_32BIT: strcpy_s(DisasmResult->Opcode, "cdq"); break;
+	case PLATFORM_64BIT:
+		if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "cqo");
+		else
+			strcpy_s(DisasmResult->Opcode, "cdq");
+		break;
+	}
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_0x6c_0x6d(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0x6c)
+	{
+
+	}
+	else
+	{
+		if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+			strcpy_s(DisasmResult->Opcode, "insw");
+		else
+			strcpy_s(DisasmResult->Opcode, "insd");
+		DisasmPoint->CurMemAddr += 1;
+	}
+	return true;
+}
+
+
+
 bool Disasm::Disasm_TWO_grp_0x00(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	char Opcode[][8] = { "sldt","str","lldt","ltr","verr","verw","","" };
@@ -1717,7 +2154,7 @@ bool Disasm::Disasm_TWO_grp_0x00(DISASM_RESULT * DisasmResult, DISASM_POINT* Dis
 bool Disasm::Disasm_TWO_grp_0x01(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
-	if (((ModRmByte >> 5) & 3) == 3)
+	if (((ModRmByte >> 6) & 3) == 3)
 	{
 		switch ((ModRmByte >> 3) & 7)
 		{
@@ -3214,14 +3651,14 @@ bool Disasm::Disasm_TWO_0xc8_0xcf(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 		UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 		switch (code)
 		{
-		case 0xc8:strcpy_s(DisasmResult->FirstOperand, "r8"); break;
-		case 0xc9:strcpy_s(DisasmResult->FirstOperand, "r9"); break;
-		case 0xca:strcpy_s(DisasmResult->FirstOperand, "r10"); break;
-		case 0xcb:strcpy_s(DisasmResult->FirstOperand, "r11"); break;
-		case 0xcc:strcpy_s(DisasmResult->FirstOperand, "r12"); break;
-		case 0xcd:strcpy_s(DisasmResult->FirstOperand, "r13"); break;
-		case 0xce:strcpy_s(DisasmResult->FirstOperand, "r14"); break;
-		case 0xcf:strcpy_s(DisasmResult->FirstOperand, "r15"); break;
+		case 0xc8:strcpy_s(DisasmResult->Operand[0], "r8"); break;
+		case 0xc9:strcpy_s(DisasmResult->Operand[0], "r9"); break;
+		case 0xca:strcpy_s(DisasmResult->Operand[0], "r10"); break;
+		case 0xcb:strcpy_s(DisasmResult->Operand[0], "r11"); break;
+		case 0xcc:strcpy_s(DisasmResult->Operand[0], "r12"); break;
+		case 0xcd:strcpy_s(DisasmResult->Operand[0], "r13"); break;
+		case 0xce:strcpy_s(DisasmResult->Operand[0], "r14"); break;
+		case 0xcf:strcpy_s(DisasmResult->Operand[0], "r15"); break;
 		}
 		DisasmPoint->CurMemAddr += 1;
 	}
@@ -3230,14 +3667,14 @@ bool Disasm::Disasm_TWO_0xc8_0xcf(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 		UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 		switch (code)
 		{
-		case 0xc8:strcpy_s(DisasmResult->FirstOperand, "r8d"); break;
-		case 0xc9:strcpy_s(DisasmResult->FirstOperand, "r9d"); break;
-		case 0xca:strcpy_s(DisasmResult->FirstOperand, "r10d"); break;
-		case 0xcb:strcpy_s(DisasmResult->FirstOperand, "r11d"); break;
-		case 0xcc:strcpy_s(DisasmResult->FirstOperand, "r12d"); break;
-		case 0xcd:strcpy_s(DisasmResult->FirstOperand, "r13d"); break;
-		case 0xce:strcpy_s(DisasmResult->FirstOperand, "r14d"); break;
-		case 0xcf:strcpy_s(DisasmResult->FirstOperand, "r15d"); break;
+		case 0xc8:strcpy_s(DisasmResult->Operand[0], "r8d"); break;
+		case 0xc9:strcpy_s(DisasmResult->Operand[0], "r9d"); break;
+		case 0xca:strcpy_s(DisasmResult->Operand[0], "r10d"); break;
+		case 0xcb:strcpy_s(DisasmResult->Operand[0], "r11d"); break;
+		case 0xcc:strcpy_s(DisasmResult->Operand[0], "r12d"); break;
+		case 0xcd:strcpy_s(DisasmResult->Operand[0], "r13d"); break;
+		case 0xce:strcpy_s(DisasmResult->Operand[0], "r14d"); break;
+		case 0xcf:strcpy_s(DisasmResult->Operand[0], "r15d"); break;
 		}
 		DisasmPoint->CurMemAddr += 1;
 	}
@@ -3489,13 +3926,13 @@ bool Disasm::Disasm_THREE38_0xf6(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 		ThreeByteCodeMap38[code].Operand = PACK_OPERAND(THREE_OPERAND, AT__B, OT__y, AT__G, OT__y, AT__E, OT__y, 0, 0);
 		//特殊处理 四个操作数
 		bool status=Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
-		strcpy_s(DisasmResult->ForthOperand,DisasmResult->ThirdOperand);
+		strcpy_s(DisasmResult->Operand[3],DisasmResult->Operand[2]);
 		if (DisasmPoint->PlatForm == PLATFORM_32BIT)
-			strcpy_s(DisasmResult->ThirdOperand, "edx");
+			strcpy_s(DisasmResult->Operand[2], "edx");
 		else if (DisasmPoint->PlatForm == PLATFORM_64BIT)
-			strcpy_s(DisasmResult->ThirdOperand, "rdx");
+			strcpy_s(DisasmResult->Operand[2], "rdx");
 		else if (DisasmPoint->PlatForm == PLATFORM_16BIT)
-			strcpy_s(DisasmResult->ThirdOperand, "dx");
+			strcpy_s(DisasmResult->Operand[2], "dx");
 		return status;
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)

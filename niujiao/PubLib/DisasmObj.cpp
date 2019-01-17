@@ -16,25 +16,21 @@ PyObject * DisasmObject_new(PyTypeObject * type, PyObject * args, PyObject * kwd
 		{
 			PyArg_ParseTuple(args, "sl", &str,&TmpResult);
 			DisasmResult = (DISASM_RESULT*)TmpResult;
-			char tmpOpStr[16] = { 0 };
+			char tmpOpStr[64] = { 0 };
 			char tmpDisasmStr[128] = { 0 };
 
-			if (DisasmResult->PrefixState&PREFIX_Lock_F0)
-				strcat(tmpDisasmStr, "lock ");
-			else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
-				strcat(tmpDisasmStr, "repne ");
-			else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
-				strcat(tmpDisasmStr, "repe ");
+			if (DisasmResult->PreStr[0])
+				strcat(tmpDisasmStr, DisasmResult->PreStr);
 
 			if (DisasmResult->OperandNum == 0)
 				sprintf(tmpOpStr, "%s", DisasmResult->Opcode);
 			else if (DisasmResult->OperandNum == 1)
-				sprintf(tmpOpStr, "%s %s", DisasmResult->Opcode, DisasmResult->FirstOperand);
+				sprintf(tmpOpStr, "%s %s", DisasmResult->Opcode, DisasmResult->Operand[0]);
 			else if (DisasmResult->OperandNum == 2)
-				sprintf(tmpOpStr, "%s %s,%s", DisasmResult->Opcode, DisasmResult->FirstOperand, DisasmResult->SecondOperand);
+				sprintf(tmpOpStr, "%s %s,%s", DisasmResult->Opcode, DisasmResult->Operand[0], DisasmResult->Operand[1]);
 			else if (DisasmResult->OperandNum == 3)
-				sprintf(tmpOpStr, "%s %s,%s,%s", DisasmResult->Opcode, DisasmResult->FirstOperand,
-					DisasmResult->SecondOperand, DisasmResult->ThirdOperand);
+				sprintf(tmpOpStr, "%s %s,%s,%s", DisasmResult->Opcode, DisasmResult->Operand[0],
+					DisasmResult->Operand[1], DisasmResult->Operand[2]);
 			strcat(tmpDisasmStr, tmpOpStr);
 
 			self->Result = PyUnicode_FromString(tmpDisasmStr);
@@ -54,7 +50,7 @@ PyObject * DisasmObject_subscript(DisasmObject * mp, PyObject * key)
 			return (PyObject *)*(int*)((int)mp + DisasmObject_members[i].offset);
 		}
 	}
-	return (PyObject *)&_PyNone_Type;
+	return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"), NULL);
 }
  void DisasmObject_dealloc(PyObject *ptr)
 {

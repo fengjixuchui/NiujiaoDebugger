@@ -66,7 +66,7 @@ PyObject * PEHeader_subscript(PEHeader * mp, PyObject * key)
 			}
 		}
 	}
-	return (PyObject *)&_PyNone_Type;
+	return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"), NULL);
 }
 
 PyObject * PEOptionalHeader_new(PyTypeObject * type, PyObject * args, PyObject * kwds)
@@ -109,7 +109,7 @@ PyObject * PEOptionalHeader_subscript(PEOptionalHeader * mp, PyObject * key)
 			}
 		}
 	}
-	return (PyObject *)&_PyNone_Type;
+	return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"), NULL);
 }
 
 PyObject * PEFormat_new(PyTypeObject *type, PyObject *args, PyObject *kwds)

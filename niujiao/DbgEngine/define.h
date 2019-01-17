@@ -102,6 +102,7 @@ enum ERegisterType
 	RG__AX, RG__CX, RG__DX, RG__BX, RG__SP, RG__BP, RG__SI, RG__DI, RG__ES, RG__SS, RG__CS, RG__DS, RG__GS, RG__FS,RG__MAX = 16
 };
 
+#define MAX_PREFIX_NUM 5
 typedef struct s_asm_str
 {
 	char m_Instruct[16];
@@ -110,14 +111,17 @@ typedef struct s_asm_str
 	char m_Third[64];
 	char m_Forth[64];
 	USHORT m_OperandNum;
+	UCHAR Prefix[MAX_PREFIX_NUM];  //0: REX前缀 1: lock 2:repe repne 3 operandsize 4 addrsize
 }SAsmStr;
 
 typedef struct s_asm_result
 {
 	UCHAR m_Result[14];
+	UCHAR Prefix[MAX_PREFIX_NUM];  //0: REX前缀 1: lock 2:repe repne 3 operandsize 4 addrsize
 	UINT m_PrefixLength : 8;
 	UINT m_OpcodeLength : 8;
 	UINT m_OperandLength : 8;
+	UINT m_PlatForm : 8;
 	INT m_TotalLength : 8;//没有结果为0 其余大于0的情况为指令长度 -1为指令出错
 	int m_ErrorCode;  //每条的匹配结果
 }SAsmResult;
@@ -137,9 +141,7 @@ typedef struct s_instruct_fmt
 	DWORD64 Operand;
 	USHORT m_Support64Bit;
 	USHORT m_Support32Bit;
-	USHORT m_SupportedCompatLegMod;
 	SHORT m_GroupPos;
-	//UINT Prefix;
 	bool(*AsmFunc)(SAsmStr* asmStr, SAsmResult* asmResult, struct s_instruct_fmt* format); //汇编函数
 }SInstructFmt;
 typedef  struct s_asm_instruct
@@ -151,3 +153,34 @@ enum
 {
 	e_Eax, e_Ecx, e_Edx, e_Ebx, e_Ebp = 5, e_Esi, e_Edi
 };
+
+//反汇编结果结构体
+enum {
+	PLATFORM_8BIT,
+	PLATFORM_16BIT,
+	PLATFORM_32BIT,
+	PLATFORM_64BIT
+};
+typedef struct disasm_result
+{
+	LPVOID CodeMap;
+	UINT64 CurFileOffset;
+	BYTE  MachineCode[16];
+	bool IsData; //可能是数据
+	UINT SIB_Prefix;
+	DWORD PrefixState;
+	char Opcode[15];
+	UINT CurrentLen;
+	UINT OperandNum;
+	char PreStr[8];
+	char Operand[4][64];
+	char  Memo[32];
+
+}DISASM_RESULT;
+
+typedef struct disasm_addr_queue
+{
+	LPVOID Addr;
+	struct disasm_addr_queue* next;
+} DISASM_ADDR_QUEUE;
+

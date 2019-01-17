@@ -53,9 +53,6 @@
     <ClInclude Include="DbgEngine\Executor.h">
       <Filter>头文件\DbgEngine</Filter>
     </ClInclude>
-    <ClInclude Include="DbgEngine\asm.h">
-      <Filter>头文件\DbgEngine</Filter>
-    </ClInclude>
     <ClInclude Include="PubLib\StrTrie.h">
       <Filter>头文件\PubLib</Filter>
     </ClInclude>
@@ -63,9 +60,6 @@
       <Filter>头文件\DbgEngine</Filter>
     </ClInclude>
     <ClInclude Include="DbgEngine\define.h">
-      <Filter>头文件\DbgEngine</Filter>
-    </ClInclude>
-    <ClInclude Include="DbgEngine\asm_struct.h">
       <Filter>头文件\DbgEngine</Filter>
     </ClInclude>
     <ClInclude Include="PubLib\PyInter.h">
@@ -83,6 +77,12 @@
     <ClInclude Include="PubLib\DisasmObj.h">
       <Filter>头文件\PubLib</Filter>
     </ClInclude>
+    <ClInclude Include="DbgEngine\asm_struct.h">
+      <Filter>头文件\DbgEngine</Filter>
+    </ClInclude>
+    <ClInclude Include="DbgEngine\asm.h">
+      <Filter>头文件\DbgEngine</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -95,9 +95,6 @@
       <Filter>源文件\DbgEngine</Filter>
     </ClCompile>
     <ClCompile Include="DbgEngine\Executor.cpp">
-      <Filter>源文件\DbgEngine</Filter>
-    </ClCompile>
-    <ClCompile Include="DbgEngine\asm.cpp">
       <Filter>源文件\DbgEngine</Filter>
     </ClCompile>
     <ClCompile Include="PubLib\StrTrie.cpp">
@@ -115,10 +112,13 @@
     <ClCompile Include="PubLib\PeObj.cpp">
       <Filter>源文件\PubLib</Filter>
     </ClCompile>
-    <ClCompile Include="PubLib\AsmObj.cpp">
-      <Filter>源文件\PubLib</Filter>
+    <ClCompile Include="DbgEngine\asm.cpp">
+      <Filter>源文件\DbgEngine</Filter>
     </ClCompile>
     <ClCompile Include="PubLib\DisasmObj.cpp">
+      <Filter>源文件\PubLib</Filter>
+    </ClCompile>
+    <ClCompile Include="PubLib\AsmObj.cpp">
       <Filter>源文件\PubLib</Filter>
     </ClCompile>
   </ItemGroup>

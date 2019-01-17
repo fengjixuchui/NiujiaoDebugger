@@ -10,6 +10,7 @@ typedef struct {
 		/* Type-specific fields go here. */
 	PyObject* AsmStr;   //原始字符串 
 	PyObject* Result;   //汇编结果
+	PyObject* TimeElapse;
 } AsmObject;
 PyObject * AsmObject_new(PyTypeObject * type, PyObject * args, PyObject * kwds);
 
@@ -24,6 +25,7 @@ static PyMappingMethods AsmObject_as_mapping = {
 static PyMemberDef AsmObject_members[] = {
 	{"AsmStr", T_OBJECT_EX, offsetof(AsmObject, AsmStr), 0,"original asm string"},
 	{"Result", T_OBJECT_EX, offsetof(AsmObject, Result), 0,"assembly result"},
+	{"TimeElapse", T_OBJECT_EX, offsetof(AsmObject, TimeElapse), 0,"elapse time:tick count"},
 	{NULL}  /* Sentinel */
 };
 

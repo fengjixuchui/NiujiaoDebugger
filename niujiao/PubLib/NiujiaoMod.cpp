@@ -36,7 +36,7 @@ niujiao_readpe(PyObject *self, PyObject *args)
 	MultiByteToWideChar(CP_ACP, 0, FileName, strlen(FileName), tFileName, 32);
 	CImageInfo *ImageInfo =new  CImageInfo();
 	if (ImageInfo->ReadImageFromFile(tFileName) == false)
-		return (PyObject *)&_PyNone_Type;
+		return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"), NULL);
 
 	PEFormat* pf = (PEFormat *)PEFormatType.tp_new(&PEFormatType, 
 													Py_BuildValue("(l)", (UINT64)ImageInfo) , 
@@ -47,22 +47,26 @@ niujiao_readpe(PyObject *self, PyObject *args)
 PyObject * niujiao_asmfromstr(PyObject * self, PyObject * args)
 {
 	const char *Str;
-	if (!PyArg_ParseTuple(args, "s", &Str))
+	int platForm = 0;
+	if (!PyArg_ParseTuple(args, "si", &Str,&platForm))
 		return NULL;
-	TCHAR tFileName[1024] = { 0 };
-
-	MultiByteToWideChar(CP_ACP, 0, Str, strlen(Str), tFileName, 32);
+	TCHAR asmStr[1024] = { 0 };
+	MultiByteToWideChar(CP_ACP, 0, Str, strlen(Str), asmStr, 512);
 	SAsmResultSet AsmResultSet = { 0 };
 	CAsm aaa = CAsm();
-	if (aaa.AsmFromStr(tFileName, &AsmResultSet) == 0)
+	UINT64 cycleCount = 0;
+	if (aaa.AsmFromStr(asmStr,platForm, &AsmResultSet) == 0)
 	{
-		return AsmObjectType.tp_new(&AsmObjectType, 
-			Py_BuildValue("(s,l)",(int)Str,(UINT64)&AsmResultSet),
+		if(AsmResultSet.m_SuccessRecord==0)
+			return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"),NULL);
+
+		return AsmObjectType.tp_new(&AsmObjectType,
+			Py_BuildValue("(s,l,i)", (int)Str, (UINT64)&AsmResultSet, 0),
 			NULL);
 	}
 	else
 	{
-		return (PyObject *)&_PyNone_Type;
+		return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"), NULL);
 	}
 }
 
@@ -96,10 +100,9 @@ PyObject * niujiao_disasmfromstr(PyObject * self, PyObject * args)
 	DISASM_RESULT DisasmResult;
 	ZeroMemory(&DisasmResult, sizeof(DISASM_RESULT));
 	Disasm Disasm;
-	 // platForm==0 32λ  platForm==1 64λ
-	if (Disasm.DisasmFromStr((char*)MachineCode, PLATFORM_32BIT+platForm, 3, &DisasmResult) == false)
+	if (Disasm.DisasmFromStr((char*)MachineCode, platForm, 3, &DisasmResult) == false)
 	{
-		return (PyObject *)&_PyNone_Type;
+		return _PyNone_Type.tp_new(NULL, Py_BuildValue("()"), NULL);
 	}
 	else
 	{
