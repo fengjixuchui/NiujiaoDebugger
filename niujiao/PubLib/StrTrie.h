@@ -11,8 +11,8 @@
 typedef struct s_trie_node
 {
 	struct s_trie_node *m_Next;
-	int m_Value;
-	int m_Func;// 函数地址
+	UINT64 m_Value;
+	UINT64 m_Func;// 函数地址
 }STrieNode;
 
 
@@ -25,8 +25,8 @@ private:
 public:
 	CStrTrie();
 	~CStrTrie();
-	int TrieAddStr(char* str, const int value, const int func) const;
-	bool GetDataInTrie( char* index, int* value, int* func) const;
+	int TrieAddStr(char* str, const UINT64 value, const UINT64 func) const;
+	bool GetDataInTrie( char* index, UINT64* value, UINT64* func) const;
 	DWORD GetColorValue(LPCTSTR);
 	SIZE GetSizeValue(LPCTSTR);
 	RECT GetRectValue(LPCTSTR);

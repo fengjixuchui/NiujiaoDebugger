@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+
+<Window size="600,500" sizebox="8,8,8,8" caption="0,0,0,60" roundcorner="8,8">
+  <Include source="scrollbar.xml" />
+  <VerticalLayout  bkcolor="0xffacadac"> 
+    <HorizontalLayout height="50" bkcolor="0xff407d94">
+      <Button text="运行Python脚本" mouse="false"  textcolor="0xdddddddd" padding="10,10,0,10" height="30" width="80"></Button>
+      <Button name="close_btn" text="关闭" width="50" height="18" padding="450,30,10,0"  borderround="2,2" bkcolor="0x88808080" textcolor="0x88ffffff" bordersize="1" bordercolor="0x88ffffff" hottextcolor="0x88de4567"></Button>
+    </HorizontalLayout>
+    <HorizontalLayout height="4" bkcolor="0xff407d94" bkcolor2="0xffffffff" padding="0,0,0,0"></HorizontalLayout>
+    <HorizontalLayout height="40" padding="0,20,0,0">
+      <Edit name="runPyScript_edit" bkcolor="0xffffffff" width="480" padding="10,0,0,0"></Edit>
+      <Button padding="20,5,0,5" bkcolor="0xffdb9c4f" name="runPyScript_btn" text="打开并运行" height="30" width="80" bordersize="1" bordercolor="0x88ffffff" textcolor="0x88ffffff"></Button>
+    </HorizontalLayout>
+  </VerticalLayout>
+</Window>

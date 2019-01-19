@@ -7,15 +7,15 @@
 #include "Disasm.h"
 
 static enum {
-	BP_System = 0x1,
-	BP_ModuleEntry = 0x10,
-	BP_WinMain = 0x100,
-	BP_CreateThread = 0x1000,
-	BP_ExitThread = 0x10000,
-	BP_LoadDll = 0x100000,
-	BP_UnloadDll = 0x1000000,
-	BP_DebugString = 0x10000000,
-	BP_BreakPoint = 0x100000000
+	BP_System = 1<<0,
+	BP_ModuleEntry = 1 << 1,
+	BP_WinMain = 1 << 2,
+	BP_CreateThread = 1 << 3,
+	BP_ExitThread = 1 << 4,
+	BP_LoadDll = 1 << 5,
+	BP_UnloadDll = 1 << 6,
+	BP_DebugString = 1 << 7,
+	BP_BreakPoint = 1 << 8,
 }BP_TYPE;//¶ÏµãÀàÐÍ
 
 static enum {

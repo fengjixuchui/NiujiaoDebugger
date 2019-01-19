@@ -328,7 +328,7 @@ bool Executor::OnLoadDllEvent(DEBUG_EVENT *DebugEvent) const
 {
 	char StrContentTmp[1024] = { 0 };
 	char StrModName[1024] = { 0 };
-	DWORD size = 0;
+	SIZE_T size = 0;
 	DWORD NameAddr = 0;
 	HANDLE hDebugged = OpenProcess(PROCESS_ALL_ACCESS, NULL, m_debuggedProcessId);
 	if (DebugEvent->u.LoadDll.lpImageName != nullptr)

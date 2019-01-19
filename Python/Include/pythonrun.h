@@ -138,7 +138,7 @@ PyAPI_FUNC(void) PyErr_Display(PyObject *, PyObject *, PyObject *);
 #define PyRun_AnyFileFlags(fp, name, flags) \
     PyRun_AnyFileExFlags(fp, name, 0, flags)
 #define PyRun_SimpleString(s) PyRun_SimpleStringFlags(s, NULL)
-#define PyRun_SimpleFile(f, p) PyRun_SimpleFileExFlags(f, p, 0, NULL)
+#define PyRun_SimpleFile(f, p) PyRun_SimpleFileExFlags++(f, p, 0, NULL)
 #define PyRun_SimpleFileEx(f, p, c) PyRun_SimpleFileExFlags(f, p, c, NULL)
 #define PyRun_InteractiveOne(f, p) PyRun_InteractiveOneFlags(f, p, NULL)
 #define PyRun_InteractiveLoop(f, p) PyRun_InteractiveLoopFlags(f, p, NULL)

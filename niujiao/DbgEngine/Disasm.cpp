@@ -4,7 +4,7 @@
 #include "stdafx.h"
 #include "Disasm.h"
 #include "Disasm_three_3a.h"
-FUNC_LIST *gFuncPoolHead = nullptr;
+DISASM_ADDR_QUEUE *gFuncPoolHead = nullptr;
 
 Disasm::Disasm()
 {
@@ -15,56 +15,17 @@ Disasm::Disasm()
 	ImageInfo = nullptr;
 }
 
-Disasm::Disasm(HANDLE hFile)
-{
-	HANDLE hMap = CreateFileMapping(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
-	if (hMap == INVALID_HANDLE_VALUE)
-		throw "CreateFileMapping Error!";
-	DWORD MapFileAddr = (DWORD)MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
-	ImageInfo=new CImageInfo(hFile);
-
-	DisasmResult = new DISASM_RESULT[ImageInfo->GetSizeOfCode()];  //TODO 1、 改成有结果才申请内容可以节省内存 2、改成内存中代码段的总记录数
-	DisasmPoint = new DISASM_POINT;
-	ZeroMemory(DisasmResult, sizeof(DISASM_RESULT)*ImageInfo->GetSizeOfCode());
-	ZeroMemory(DisasmPoint, sizeof(DISASM_POINT));
-
-	char str[64] = { 0 };
-	sprintf_s(str, "开始申请内存,开始位置 %x 数量 %d  大小 %d\n", (int)DisasmResult, ImageInfo->GetSizeOfCode(), sizeof(DISASM_RESULT));
-	//printf(str);
-	DisasmResultBySeq = nullptr;
-	gFuncPoolHead = nullptr;
-
-	DisasmPoint->BaseOfImage = ImageInfo->GetImageBase();
-	DisasmPoint->BaseOfCode = ImageInfo->GetBaseOfCode();
-	DisasmPoint->EntryOfCode = ImageInfo->GetAddressOfEntryPoint();
-	FuncAdd(DisasmPoint->EntryOfCode);
-	DisasmPoint->LenOfCode = ImageInfo->GetSizeOfCode();
-	DisasmPoint->FileStartOfCode = MapFileAddr + ImageInfo->GetBaseOfCodeInFile();
-	DisasmPoint->MapFileAddr = MapFileAddr;
-	DisasmPoint->FileEndOfCode = DisasmPoint->FileStartOfCode + ImageInfo->GetMemSizeOfCode();
-	DisasmPoint->BaseOfCodeInFile = ImageInfo->GetBaseOfCodeInFile();
-	if (ImageInfo->Is32Image())
-		DisasmPoint->PlatForm = PLATFORM_32BIT;
-	else
-		DisasmPoint->PlatForm = PLATFORM_64BIT;
-
-	/*第一遍 初步遍历函数*/
-	DisasmFile();
-	/*第二遍 检查遗漏函数*/
-	/*第三遍 检查立即数*/
-
-	UnmapViewOfFile((LPVOID)MapFileAddr);
-	CloseHandle(hMap);
-}
-
-Disasm::Disasm(char * FileName)
-{
-}
-
 Disasm::~Disasm()
 {
-	//if (DisasmResult)
-	//	delete[] DisasmResult;
+	if (DisasmResult)
+	{
+		for (UINT i = 0; i < DisasmPoint->LenOfCode; i++)
+		{
+			if (*(DisasmResult + i)!=0)
+				delete *(DisasmResult + i);
+		}
+		delete[] DisasmResult;
+	}
 	if (DisasmPoint)
 		delete DisasmPoint;
 	//if (DisasmResultBySeq)
@@ -75,15 +36,15 @@ Disasm::~Disasm()
 
 DISASM_RESULT * Disasm::GetDisasmResult(DWORD addr) const
 {
-	return DisasmResult + addr - DisasmPoint->BaseOfCode;
+	return *DisasmResult + addr - DisasmPoint->VirtualAddress;
 }
 
 DISASM_RESULT * Disasm::GetDisasmResult() const
 {
-	return DisasmResult;
+	return *DisasmResult;
 }
 
-DWORD * Disasm::GetDisasmResultBySeq() const
+LPVOID * Disasm::GetDisasmResultBySeq() const
 {
 	return DisasmResultBySeq;
 }
@@ -100,46 +61,46 @@ void Disasm::IndexResultBySeq(DISASM_POINT* DisasmPoint)
 {
 	if (DisasmResultBySeq)
 		delete[] DisasmResultBySeq;
-	DisasmResultBySeq = new DWORD[DisasmPoint->TotalDisasmRecord];
+	DisasmResultBySeq = new LPVOID[DisasmPoint->TotalDisasmRecord];
 	ZeroMemory(DisasmResultBySeq, sizeof(DWORD)*DisasmPoint->TotalDisasmRecord);
 	int record = 0;
 	for (unsigned int i = 0; i < DisasmPoint->LenOfCode; i++)
 	{
 		if ((*(DWORD*)(DisasmResult + i)) != NULL)
 		{
-			*(DisasmResultBySeq + record) = (DWORD)(DisasmResult + i);
+			*(DisasmResultBySeq + record) = (LPVOID)(DisasmResult + i);
 			record++;
 		}
 	}
 }
-bool Disasm::FuncAdd(DWORD Addr)
+bool Disasm::PushDisasmFuncAddr(LPVOID Addr)
 {
-	FUNC_LIST *tmp = gFuncPoolHead;
+	DISASM_ADDR_QUEUE *tmp = gFuncPoolHead;
 	if (gFuncPoolHead == nullptr)
 	{
-		gFuncPoolHead = new FUNC_LIST;
+		gFuncPoolHead = new DISASM_ADDR_QUEUE;
 		tmp = gFuncPoolHead;
 	}
 	else
 	{
 		while (tmp->next)
 			tmp = tmp->next;
-		tmp->next = new FUNC_LIST;
+		tmp->next = new DISASM_ADDR_QUEUE;
 		tmp = tmp->next;
 	}
 	tmp->Addr = Addr;
 	tmp->next = nullptr;
 	return true;
 }
-DWORD Disasm::FuncPop()
+LPVOID Disasm::PopDisasmFuncAddr()
 {
-	DWORD data = 0;
+	LPVOID data = 0;
 	if (gFuncPoolHead)
 	{
 		data = gFuncPoolHead->Addr;
 		if (gFuncPoolHead->next)
 		{
-			FUNC_LIST *tmp = gFuncPoolHead;
+			DISASM_ADDR_QUEUE *tmp = gFuncPoolHead;
 			gFuncPoolHead = gFuncPoolHead->next;
 			delete tmp;
 		}
@@ -148,13 +109,12 @@ DWORD Disasm::FuncPop()
 			delete gFuncPoolHead;
 			gFuncPoolHead = nullptr;
 		}
-
 	}
 	return data;
 }
-int Disasm::GetFuncPoolSize()
+int Disasm::GetDisasmFuncAddrCount()
 {
-	FUNC_LIST *tmp = gFuncPoolHead;
+	DISASM_ADDR_QUEUE *tmp = gFuncPoolHead;
 	int size = 0;
 	if (tmp)
 	{
@@ -167,34 +127,133 @@ int Disasm::GetFuncPoolSize()
 	}
 	return size;
 }
+bool Disasm::DisasmFromHandle(HANDLE hFile)
+{
+	HANDLE hMap = CreateFileMapping(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+	if (hMap == INVALID_HANDLE_VALUE)
+		return false;
+	LPVOID MapFileAddr = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+	if (MapFileAddr == 0)
+	{
+		CloseHandle(hMap);
+		return false;
+	}
+	ImageInfo = new CImageInfo();
+	if (ImageInfo->ReadImageFromMem(MapFileAddr) == false)
+	{
+		CloseHandle(hMap);
+		UnmapViewOfFile(MapFileAddr);
+		delete ImageInfo;
+		return false;
+	}
+	DisasmResult = (DISASM_RESULT**)new LPVOID[ImageInfo->GetSizeOfCode()];  //TODO 1、 改成有结果才申请内容可以节省内存 2、改成内存中代码段的总记录数
+	DisasmPoint = new DISASM_POINT;
+	ZeroMemory(DisasmResult, sizeof(LPVOID)*ImageInfo->GetSizeOfCode());
+	ZeroMemory(DisasmPoint, sizeof(DISASM_POINT));
+
+	char str[64] = { 0 };
+	sprintf_s(str, "开始申请内存,开始位置 %x 数量 %d  大小 %d\n", (int)DisasmResult, ImageInfo->GetSizeOfCode(), sizeof(DISASM_RESULT));
+	//printf(str);
+
+	DisasmResultBySeq = nullptr;
+	gFuncPoolHead = nullptr;
+
+	DisasmPoint->ImageInfo = ImageInfo;
+	DisasmPoint->MapFileAddr = MapFileAddr;
+	DisasmPoint->FileStartOfCode = (UINT64)MapFileAddr + ImageInfo->GetBaseOfCodeInFile();
+	DisasmPoint->FileEndOfCode = DisasmPoint->FileStartOfCode + ImageInfo->GetMemSizeOfCode();
+	PushDisasmFuncAddr((LPVOID)DisasmPoint->ImageInfo->GetAddressOfEntryPoint());
+
+	DisasmPoint->BaseOfImage = ImageInfo->GetImageBase();
+	DisasmPoint->VirtualAddress = ImageInfo->GetVirtualAddress();
+	DisasmPoint->LenOfCode = ImageInfo->GetSizeOfCode();
+	DisasmPoint->BaseOfCodeInFile = ImageInfo->GetBaseOfCodeInFile();
+	if (ImageInfo->Is32Image())
+		DisasmPoint->PlatForm = PLATFORM_32BIT;
+	else
+		DisasmPoint->PlatForm = PLATFORM_64BIT;
+
+	/*第一遍 初步遍历函数*/
+	DisasmFile();
+	/*第二遍 检查遗漏函数*/
+	/*第三遍 检查立即数*/
+
+	UnmapViewOfFile(MapFileAddr);
+	CloseHandle(hMap);
+	return true;
+}
+bool Disasm::DisasmFromFile(LPCTSTR * FileName)
+{
+	return false;
+}
+bool Disasm::DisasmFromFile(char * FileName)
+{
+	return false;
+}
+bool Disasm::DisasmFromStr(char * Str, int platForm, int length, DISASM_RESULT * DisasmResult)
+{
+	if (DisasmResult == nullptr)
+		return false;
+
+	DisasmResult->CodeMap = (LPVOID)gOneByteCodeMap;
+	UINT64 StartDisasmAddr = (UINT64)Str;	
+	DISASM_POINT DisasmPoint;
+	ZeroMemory(&DisasmPoint, sizeof(DISASM_POINT));
+	DisasmPoint.PlatForm = platForm;
+	DisasmPoint.CurMemAddr = (UINT64)Str;
+	int SegmentIsFinished = 0;
+	while (true) //循环解析一条指令：不定数量的前缀和其他内容
+	{
+		UCHAR code = *(UCHAR*)(DisasmPoint.CurMemAddr);
+		//先拷贝助记符  部分指令在函数里面修改助记符
+		if (gOneByteCodeMap[code].OpStr)
+			strcpy_s(DisasmResult->Opcode, gOneByteCodeMap[code].OpStr);
+		DisasmResult->CurrentLen = 0;
+		if (gOneByteCodeMap[code].DisasmFunc(DisasmResult, &DisasmPoint, &SegmentIsFinished))
+		{
+			if (DisasmResult->CurrentLen == 0)
+				DisasmResult->CurrentLen = UINT(DisasmPoint.CurMemAddr - StartDisasmAddr);//计算指令长度
+			memcpy(DisasmResult->MachineCode, (LPVOID)(StartDisasmAddr), DisasmResult->CurrentLen);//拷贝机器码
+			DisasmPoint.TotalDisasmRecord += 1;
+			if (code != 0x0f)  //此处只负责订正一字节操作码的擦作数  其它字节操作码在其实现部分修改
+			{
+				if (DisasmResult->OperandNum == 0)
+					DisasmResult->OperandNum = GET_OPERAND_NUM((gOneByteCodeMap[code].Operand)); //部分指令在函数内修改此参数
+			}
+			return true;
+		}
+	}
+	return false;
+}
 bool IsGernerl = false;
 bool Disasm::DisasmFile()
 {
 	int i = 0;
-	//while (FuncQueue.size() > 0)
 	char str[256];
-	while (GetFuncPoolSize())
+	while (GetDisasmFuncAddrCount())
 	{
 		int SegmentIsFinished = 0;
-		DWORD aa = FuncPop();
-		DisasmPoint->CurrentAddr = DisasmPoint->MapFileAddr + aa - DisasmPoint->BaseOfCode + DisasmPoint->BaseOfCodeInFile;//映射基址+地址-内存基址+文件基址
+		LPVOID aa = PopDisasmFuncAddr();
+		DisasmPoint->CurMemAddr = (UINT64)DisasmPoint->MapFileAddr + (UINT64)aa - DisasmPoint->VirtualAddress + DisasmPoint->BaseOfCodeInFile;//映射基址+地址-内存基址+文件基址
 
-		sprintf_s(str, "------------开始解析首地址%X\n", DisasmPoint->CurrentAddr);
+		//sprintf_s(str, "------------开始解析首地址%X\n", DisasmPoint->CurMemAddr);
 		//printf(str);
 		while (!SegmentIsFinished) //循环解析一段指令
 		{
-			DISASM_RESULT * DisasmResultTmp = DisasmResult + DisasmPoint->CurrentAddr - DisasmPoint->MapFileAddr - DisasmPoint->BaseOfCodeInFile;
-			if (DisasmResultTmp->CurrentAddr != 0) break; //已经反汇编过了
+			DISASM_RESULT * DisasmResultTmp = new DISASM_RESULT;
+			ZeroMemory(DisasmResultTmp, sizeof(DISASM_RESULT));
+			*(DisasmResult + DisasmPoint->CurMemAddr - (UINT64)DisasmPoint->MapFileAddr - DisasmPoint->BaseOfCodeInFile)= DisasmResultTmp;
+			if (DisasmResultTmp->CurFileOffset != 0) break; //已经反汇编过了
 
-			DisasmResultTmp->CodeMap = (int*)gOneByteCodeMap;
-			DisasmResultTmp->CurrentAddr = DisasmPoint->CurrentAddr - DisasmPoint->FileStartOfCode + DisasmPoint->BaseOfCode;
-			DWORD AddrLenghtFlag = DisasmPoint->CurrentAddr;
+			DisasmResultTmp->CodeMap = (LPVOID)gOneByteCodeMap;
+			DisasmResultTmp->CurFileOffset = DisasmPoint->CurMemAddr - DisasmPoint->FileStartOfCode + DisasmPoint->VirtualAddress;
+			UINT64 StartDisasmAddr = DisasmPoint->CurMemAddr;
 
-			sprintf_s(str, "开始解析指令地址%X\t", DisasmResultTmp->CurrentAddr);
+			//sprintf_s(str, "开始解析指令地址%X\t", DisasmResultTmp->CurrentAddr);
 			//printf(str);
 			while (true) //循环解析一条指令：不定数量的前缀和其他内容
 			{
-				UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+				UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 				//先拷贝助记符  部分指令在函数里面修改助记符
 				if (gOneByteCodeMap[code].OpStr)
 					strcpy_s(DisasmResultTmp->Opcode, gOneByteCodeMap[code].OpStr);
@@ -202,9 +261,9 @@ bool Disasm::DisasmFile()
 				if (gOneByteCodeMap[code].DisasmFunc(DisasmResultTmp, DisasmPoint, &SegmentIsFinished))
 				{
 					if (DisasmResultTmp->CurrentLen == 0)
-						DisasmResultTmp->CurrentLen = (DisasmPoint->CurrentAddr - AddrLenghtFlag);//计算指令长度
-					memcpy(DisasmResultTmp->MachineCode, (LPVOID)(AddrLenghtFlag), DisasmResultTmp->CurrentLen);//拷贝机器码
-					if (DisasmPoint->CurrentAddr == DisasmPoint->FileEndOfCode) //检查是否到文件结尾
+						DisasmResultTmp->CurrentLen = UINT(DisasmPoint->CurMemAddr - StartDisasmAddr);//计算指令长度
+					memcpy(DisasmResultTmp->MachineCode, (LPVOID)(StartDisasmAddr), DisasmResultTmp->CurrentLen);//拷贝机器码
+					if (DisasmPoint->CurMemAddr == DisasmPoint->FileEndOfCode) //检查是否到文件结尾
 					{
 						SegmentIsFinished = 1;
 					}
@@ -222,14 +281,15 @@ bool Disasm::DisasmFile()
 					break; //当前指令解析完成
 				}
 			}
-
-			sprintf_s(str, "\t 指令长度%d\n", DisasmResultTmp->CurrentLen);
-			//printf(str);
+			if (SegmentIsFinished)
+			{
+				//TestPrintToFile();
+				//exit(0);
+			}
 		}
 	}
-	//TestPrintToFile();
 	IndexResultBySeq(DisasmPoint);
-	printf("解析完毕 \n");
+	//printf("解析完毕 \n");
 	return true;
 }
 bool Disasm::TestPrintToFile() const
@@ -240,13 +300,15 @@ bool Disasm::TestPrintToFile() const
 	char tmp[256] = { 0 };
 	for (UINT i = 0; i < DisasmPoint->LenOfCode; i++)
 	{
-		DISASM_RESULT* TmpResult = DisasmResult + i;
-		if (TmpResult == nullptr || TmpResult->CurrentAddr == 0)
+		if (*(DisasmResult + i) == nullptr)
 			continue;
-		sprintf_s(PrintData, "%08X", TmpResult->CurrentAddr + DisasmPoint->BaseOfImage);
+		DISASM_RESULT* TmpResult = *(DisasmResult + i);
+		if (TmpResult == nullptr || TmpResult->CurFileOffset == 0)
+			continue;
+		sprintf_s(PrintData, "%08llX", TmpResult->CurFileOffset + DisasmPoint->BaseOfImage);
 		strcat_s(PrintData, "|");
 		//扣前缀
-		int count = 0;
+		UINT count = 0;
 		int x = TmpResult->PrefixState;
 		while (x)
 		{
@@ -254,7 +316,7 @@ bool Disasm::TestPrintToFile() const
 			x &= (x - 1);
 		}
 		memset(tmp, 0x00, sizeof(tmp));
-		for (int j = 0; j < (TmpResult->CurrentLen); j++)
+		for (UINT j = 0; j < (TmpResult->CurrentLen); j++)
 		{
 			char HexData[4] = { 0 };
 			sprintf(HexData, "%02X", *(BYTE*)((BYTE*)TmpResult->MachineCode + j));
@@ -274,12 +336,12 @@ bool Disasm::TestPrintToFile() const
 		if (TmpResult->OperandNum == 0)
 			sprintf(tmp, "%s", TmpResult->Opcode);
 		else if (TmpResult->OperandNum == 1)
-			sprintf(tmp, "%s %s", TmpResult->Opcode, TmpResult->FirstOperand);
+			sprintf(tmp, "%s %s", TmpResult->Opcode, TmpResult->Operand[0]);
 		else if (TmpResult->OperandNum == 2)
-			sprintf(tmp, "%s %s,%s", TmpResult->Opcode, TmpResult->FirstOperand, TmpResult->SecondOperand);
+			sprintf(tmp, "%s %s,%s", TmpResult->Opcode, TmpResult->Operand[0], TmpResult->Operand[1]);
 		else if (TmpResult->OperandNum == 3)
-			sprintf(tmp, "%s %s,%s,%s", TmpResult->Opcode, TmpResult->FirstOperand,
-				TmpResult->SecondOperand, TmpResult->ThirdOperand);
+			sprintf(tmp, "%s %s,%s,%s", TmpResult->Opcode, TmpResult->Operand[0],
+				TmpResult->Operand[1], TmpResult->Operand[2]);
 		strcat(PrintData, tmp);
 		strcat(PrintData, "\n");
 		fwrite(PrintData, strlen(PrintData), 1, fp);
@@ -296,7 +358,7 @@ bool Disasm::SetDataType(DISASM_POINT* DisasmPoint, DWORD addr, int size)
 
 bool Disasm::GernelDisasm(DISASM_RESULT * DisasmResult, DISASM_POINT*  DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
 	code = 0x00;
 	IsGernerl = true;
 	return true;
@@ -322,15 +384,445 @@ char * Disasm::GetNumbericType(DISASM_RESULT * DisasmResult, int base, int seg)
 	return NumbericTypeResult;
 }
 
+int Disasm::GetOperAndAddrSize2(int platFrom, UINT64 Prefix, int * addrSize, int * OperandSize)
+{
+	//intel 82页
+	int tmpAddrSize = 0;
+	int tmpOperandSize = 0;
+	switch (platFrom)
+	{
+	case PLATFORM_16BIT:
+		tmpOperandSize = PLATFORM_16BIT;
+		tmpAddrSize = PLATFORM_16BIT;
+		if (Prefix&PREFIX_Oprand_Size_66)
+			tmpOperandSize = PLATFORM_32BIT;
+		if (Prefix&PREFIX_Address_Size_67)
+			tmpAddrSize = PLATFORM_32BIT;
+		break;
+	case PLATFORM_32BIT:
+		tmpOperandSize = PLATFORM_32BIT;
+		tmpAddrSize = PLATFORM_32BIT;
+		if (Prefix&PREFIX_Oprand_Size_66)
+			tmpOperandSize = PLATFORM_16BIT;
+		if (Prefix&PREFIX_Address_Size_67)
+			tmpAddrSize = PLATFORM_16BIT;
+		break;
+	case PLATFORM_64BIT:
+		if (Prefix&PREFIX_REX_W)
+			tmpOperandSize = PLATFORM_64BIT;
+		else
+		{
+			if (Prefix&PREFIX_Oprand_Size_66)
+				tmpOperandSize = PLATFORM_16BIT;
+			else
+				tmpOperandSize = PLATFORM_32BIT;
+		}
+		if (Prefix&PREFIX_Address_Size_67)
+			tmpAddrSize = PLATFORM_32BIT;
+		else
+			tmpAddrSize = PLATFORM_64BIT;
+	}
+	if (addrSize) *addrSize = tmpAddrSize;
+	if (OperandSize) *OperandSize = tmpOperandSize;
+	return 0;
+}
+
+
+int Disasm::GetOperAndAddrSize(int platFrom, UINT64 Prefix, UINT64 OperandInt, int* addrSize, int* OperandSize)
+{
+	//首先检查操作数的宽度
+	if (addrSize)
+	{
+		for (int i = 0; i < GET_OPERAND_NUM(OperandInt); i++)
+		{
+			switch (GET_OPERAND_TYPE(OperandInt, i)) //可能会出现bug
+			{
+			case OT__b:
+				*addrSize = PLATFORM_8BIT;
+				break;
+			case OT__w:
+				*addrSize = PLATFORM_16BIT;
+				break;
+			case OT__v:
+			case OT__z:
+			case OT__d:
+				*addrSize = PLATFORM_32BIT;
+				break;
+			}
+
+		}
+		if (Prefix&PREFIX_Oprand_Size_66)
+			*addrSize += 1;
+		if (Prefix&PREFIX_REX_W)
+		{
+			*addrSize = PLATFORM_64BIT;
+		}
+	}
+	if (OperandSize)
+	{
+		switch (platFrom)
+		{
+		case PLATFORM_8BIT:
+			*OperandSize = PLATFORM_8BIT;
+			break;
+		case PLATFORM_16BIT:
+			if(Prefix&PREFIX_Oprand_Size_66)
+				*OperandSize = PLATFORM_32BIT;
+			else
+				*OperandSize = PLATFORM_16BIT;
+			break;
+		case PLATFORM_32BIT:
+			if (Prefix&PREFIX_Oprand_Size_66)
+				*OperandSize = PLATFORM_16BIT;
+			else
+				*OperandSize = PLATFORM_32BIT;
+			break;
+		case PLATFORM_64BIT:
+			*OperandSize = PLATFORM_32BIT;
+			break;
+		}
+	}
+	return 0;
+}
+
+
+
+int Disasm::GetSegReg(UINT64 OperandInt, int DefReg)
+{
+	if ((OperandInt&(PREFIX_Seg_ES_26 | PREFIX_Seg_CS_2E | PREFIX_Seg_SS_36 | PREFIX_Seg_DS_3E | PREFIX_Seg_FS_64 | PREFIX_Seg_GS_65)) == 0)
+		return DefReg;
+	if (OperandInt&PREFIX_Seg_ES_26)
+		return 0;
+	if (OperandInt&PREFIX_Seg_CS_2E)
+		return 1;
+	if (OperandInt&PREFIX_Seg_SS_36)
+		return 2;
+	if (OperandInt&PREFIX_Seg_DS_3E)
+		return 3;
+	if (OperandInt&PREFIX_Seg_FS_64)
+		return 4;
+	if (OperandInt&PREFIX_Seg_GS_65)
+		return 5;
+}
+
+bool Disasm::Disasm_GetEachOperand(DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint, int* IsFinished)
+{
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	DWORD64 OperandInt = ((str_map_code*)DisasmResult->CodeMap + code)->Operand;
+
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = GET_OPERAND_NUM(OperandInt);
+
+	for (int i = 0; i < GET_OPERAND_NUM(OperandInt); i++)
+	{
+		switch (GET_ADDRES_TYPE(OperandInt, i))
+		{
+		case AT__I:
+			Disasm_GetImm(i, GET_OPERAND_TYPE(OperandInt, i),DisasmResult, DisasmPoint);
+			break;
+		}
+	}
+
+	return true;
+}
+
+bool Disasm::Disasm_GetImm(int pos,int type,DISASM_RESULT*DisasmResult, DISASM_POINT*  DisasmPoint)
+{
+	switch (type)
+	{
+	case OT__b:
+		sprintf(DisasmResult->Operand[pos], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+		DisasmPoint->CurMemAddr += 1; //当前操作数
+		break;
+	}
+	return false;
+}
+
+bool Disasm::Disasm_no_operand(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_d4_d5(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*((UCHAR*)(DisasmPoint->CurMemAddr) + 1) == 0x0A)
+	{
+		DisasmPoint->CurMemAddr += 2;
+		DisasmResult->OperandNum = 0;
+		return true;
+	}
+	return Disasm_GetEachOperand(DisasmResult, DisasmPoint, IsFinished);
+}
+
+bool Disasm::Disasm_a6_a7(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr)  == 0xa6)
+	{
+		strcpy_s(DisasmResult->Opcode, "cmpsb");
+	}
+	else
+	{
+		if(DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "cmpsq");
+		else if(DisasmPoint->PlatForm==PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "cmpsw");
+		else
+			strcpy_s(DisasmResult->Opcode, "cmpsd");
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_6c_6d(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0x6c)
+	{
+		strcpy_s(DisasmResult->Opcode, "insb");
+	}
+	else
+	{
+		if(DisasmPoint->PlatForm==PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "insw");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "insw");
+			else
+				strcpy_s(DisasmResult->Opcode, "insd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_cc(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	strcpy_s(DisasmResult->Opcode, "int3");
+	return true;
+}
+
+bool Disasm::Disasm_cf(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	switch (DisasmPoint->PlatForm)
+	{
+	case PLATFORM_16BIT:strcpy_s(DisasmResult->Opcode, "iret"); break;
+	case PLATFORM_32BIT:
+		if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+			strcpy_s(DisasmResult->Opcode, "iret");
+		else
+			strcpy_s(DisasmResult->Opcode, "iretd");
+		break;
+	case PLATFORM_64BIT:
+		if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "iretq");
+		else
+			strcpy_s(DisasmResult->Opcode, "iretd");
+		break;
+	}
+	return true;
+}
+
+bool Disasm::Disasm_ac_ad(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xac)
+	{
+		strcpy_s(DisasmResult->Opcode, "lodsb");
+	}
+	else
+	{
+		char Opcode[][8] = { "lodsw","lodsd","lodsq" };
+		if(DisasmPoint->PlatForm==PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, Opcode[0]);
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, Opcode[0]);
+			else
+				strcpy_s(DisasmResult->Opcode, Opcode[2]);
+		}
+			strcpy_s(DisasmResult->Opcode, Opcode[2]);
+		// 32位 ad  lodsd      //lods dword ptr [esi]
+		// 32位 67 ad  lodsd      lods dword ptr [si]
+		// 32位 66 ad  lodsw      //lods word ptr [esi]
+		// 32位 66 67 ad  lodsw   lods word ptr [si]
+		// 64位 ad  lodsd 
+		// 64位 66 ad  lodsw 
+		// 64位 67 ad  lodsd     lods dword ptr [esi]
+		// 64位 66 67 ad  lods     lods word ptr [esi]
+		// 64位 REX.W ad  lodsq 
+		// 64位 REX.W 66 ad  lodsw 
+		// 64位 REX.W 66 67 ad  lodsw  lods word ptr [si]
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "lodsw");
+		else if(DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "lodsq");
+		else 
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "lodsw");
+			else
+				strcpy_s(DisasmResult->Opcode, "lodsd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_a4_a5(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xa4)
+	{
+		strcpy_s(DisasmResult->Opcode, "movsb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "movsw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "movsq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "movsw");
+			else
+				strcpy_s(DisasmResult->Opcode, "movsd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_6e_6f(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0x6e)
+	{
+		strcpy_s(DisasmResult->Opcode, "outsb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "outsw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "outsq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "outsw");
+			else
+				strcpy_s(DisasmResult->Opcode, "outsd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_aa_ab(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xaa)
+	{
+		strcpy_s(DisasmResult->Opcode, "stosb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "stosw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "stosq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "stosw");
+			else
+				strcpy_s(DisasmResult->Opcode, "stosd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_ae_af(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0xae)
+	{
+		strcpy_s(DisasmResult->Opcode, "scasb");
+	}
+	else
+	{
+		if (DisasmPoint->PlatForm == PLATFORM_16BIT)
+			strcpy_s(DisasmResult->Opcode, "scasw");
+		else if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "scasq");
+		else
+		{
+			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+				strcpy_s(DisasmResult->Opcode, "scasw");
+			else
+				strcpy_s(DisasmResult->Opcode, "scasd");
+		}
+	}
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 0;
+	return true;
+}
+
+bool Disasm::Disasm_set_prefix(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
+{
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	DisasmResult->PrefixState |= gOneByteCodeMap[code].Operand;
+	DisasmPoint->CurMemAddr += 1;
+	if (DisasmResult->PreStr[0])
+	{
+		strcpy_s(DisasmResult->Opcode, "illegal instruction");
+		return true;
+	}
+	switch (code)
+	{
+	case 0xF0:strcpy_s(DisasmResult->PreStr, "lock"); break;
+	case 0xF2:strcpy_s(DisasmResult->PreStr, "repne"); break;
+	case 0xF3:strcpy_s(DisasmResult->PreStr, "rep"); break;
+	}
+	return false;
+}
+bool Disasm::Disasm_ac_a4_6e_9d_aa_ae(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	DisasmResult->OperandNum = 1;
+	int regSize = DisasmPoint->PlatForm;
+	int OperandSize = 0;
+	if (DisasmResult->PrefixState&PREFIX_Address_Size_67) //寄存器宽度提升
+		if(DisasmPoint->PlatForm!=PLATFORM_16BIT)
+			regSize -= 1;
+		else
+			regSize += 1;
+	sprintf(DisasmResult->Operand[0], "%s %s[%s]", gNumbericType[OperandSize],gSegRegStr[GetSegReg(DisasmResult->PrefixState,3)], gRegister[regSize*RG__MAX+6]);
+	return true;
+}
+
+
+
+
+
+
 
 
 bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
 	DWORD64 OperandInt = ((str_map_code*)DisasmResult->CodeMap + code)->Operand;
-	char *OperandArr[] = { DisasmResult->FirstOperand,DisasmResult->SecondOperand, DisasmResult->ThirdOperand , DisasmResult->ForthOperand };
 	int base = 0;
-	DisasmPoint->CurrentAddr += 1; //OpCode 字节
+	DisasmPoint->CurMemAddr += 1; //OpCode 字节
+	int addrSize = 0;
+	int operandSize = 0;
+	GetOperAndAddrSize(DisasmPoint->PlatForm,DisasmResult->PrefixState, OperandInt, &addrSize, &operandSize);
 	for (int i = 0; i < GET_OPERAND_NUM(OperandInt); i++)
 	{
 		switch (GET_OPERAND_TYPE(OperandInt, i)) //可能会出现bug
@@ -341,81 +833,76 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 		case OT__w:
 			base = 1;
 			break;
+		case OT__v:
+		case OT__z:
 		case OT__d:
 			base = 2;
-			break;
-		case OT__q:
-			base = 3;
-			break;
-		case OT__z:
-		case OT__v:
-			base = DisasmPoint->PlatForm;
 			break;
 		}
 		switch (GET_ADDRES_TYPE(OperandInt, i))
 		{
 		case AT__X:  //DS:rSI 寻址
-			sprintf(OperandArr[i], "%s[%s]", GetNumbericType(DisasmResult, base), gRegister[RG__SI + DisasmPoint->PlatForm * RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s[%s]", GetNumbericType(DisasmResult, addrSize), gRegister[RG__SI + operandSize * RG__MAX]);
 			break;
 		case AT__Y:  //ES:rDI 寻址
-			sprintf(OperandArr[i], "%s[%s]", GetNumbericType(DisasmResult, base, PREFIX_Seg_ES_26), gRegister[RG__DI + DisasmPoint->PlatForm * RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s[%s]", GetNumbericType(DisasmResult, addrSize, PREFIX_Seg_ES_26), gRegister[RG__DI + operandSize * RG__MAX]);
 			break;
 		case AT__REG8:
-			sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i)]);
+			sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i)]);
 			break;
 		case AT_XX:
-			sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + RG__MAX]);
 			break;
 		case AT_eXX:
 		case AT_rXX:
-			base = DisasmPoint->PlatForm;
+			base = 2;
 			if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
-				sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + (base - 1) * RG__MAX]);
+				sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + (base - 1) * RG__MAX]);
 			else
-				sprintf(OperandArr[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + base * RG__MAX]);
+				sprintf(DisasmResult->Operand[i], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, i) + base * RG__MAX]);
 			break;
 		case AT__I:
 			switch (GET_OPERAND_TYPE(OperandInt, i))
 			{
 			case OT__b:
-				if(*(UCHAR*)DisasmPoint->CurrentAddr&0x80)
-					sprintf(OperandArr[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurrentAddr^0xFF)+1);
+				if(*(UCHAR*)DisasmPoint->CurMemAddr&0x80)
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr^0xFF)+1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(UCHAR*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 1; //当前操作数
+					sprintf(DisasmResult->Operand[i], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 1; //当前操作数
 				break;
 			case OT__w:
 			OPERAND_TWO:
-				if(*(USHORT*)DisasmPoint->CurrentAddr&0x8000)
-					sprintf(OperandArr[i], "-0x%X", (*(USHORT*)DisasmPoint->CurrentAddr^0xFFFF)+1);
+				if(*(USHORT*)DisasmPoint->CurMemAddr&0x8000)
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(USHORT*)DisasmPoint->CurMemAddr^0xFFFF)+1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(USHORT*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 2; //当前操作数
+					sprintf(DisasmResult->Operand[i], "0x%X", *(USHORT*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 2; //当前操作数
 				break;
 			case OT__d:
 				if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 					goto OPERAND_TWO;
 
 			OPERAND_FOUR:
-				if(*(DWORD32*)DisasmPoint->CurrentAddr&0x80000000)
-					sprintf(OperandArr[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurrentAddr ^ 0xFFFFFFFF) + 1);
+				if(*(DWORD32*)DisasmPoint->CurMemAddr&0x80000000)
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(DWORD32*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 4; //当前操作数
+					sprintf(DisasmResult->Operand[i], "0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4; //当前操作数
 				break;
 			case OT__q:
 				if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 					goto OPERAND_FOUR;
 			OPERAND_EIGHT:
-				if (*(DWORD64*)DisasmPoint->CurrentAddr & 0x8000000000000000)
-					sprintf(OperandArr[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurrentAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
+				if (*(DWORD64*)DisasmPoint->CurMemAddr & 0x8000000000000000)
+					sprintf(DisasmResult->Operand[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%llX", *(DWORD64*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 8; //当前操作数
+					sprintf(DisasmResult->Operand[i], "0x%llX", *(DWORD64*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 8; //当前操作数
 				break;
 			case OT__z:
 			case OT__v:
-				int IntSize = sizeof(int);
+				int IntSize = 4;
 				if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 					IntSize /= 2;
 				if (IntSize == 2) goto OPERAND_TWO;
@@ -433,48 +920,60 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			{
 			case OT__b:
 			INT_1:
-				Offset = *(BYTE*)DisasmPoint->CurrentAddr;
+				Offset = *(BYTE*)DisasmPoint->CurMemAddr;
 				if ((Offset & 0x80) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFF) + 1);
-				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(BYTE);  //操作数长度
+					Offset = ((Offset ^ 0xFF) + 1)*-1;
+				DisasmPoint->CurMemAddr = DisasmPoint->CurMemAddr + sizeof(BYTE);  //操作数长度
 				break;
 			case OT__w:
 				if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66) goto INT_1;
 			INT_2:
-				Offset = *(short*)DisasmPoint->CurrentAddr;
+				Offset = *(short*)DisasmPoint->CurMemAddr;
 				if ((Offset & 0x8000) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFFFF) + 1);
-				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(short);  //操作数长度
+					Offset = ((Offset ^ 0xFFFF) + 1)*-1;
+				DisasmPoint->CurMemAddr = DisasmPoint->CurMemAddr + sizeof(short);  //操作数长度
 				break;
 			case OT__d:
 				if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66) goto INT_2;
 			INT_4:
-				Offset = *(DWORD32*)DisasmPoint->CurrentAddr;
+				Offset = *(DWORD32*)DisasmPoint->CurMemAddr;
 				if ((Offset & 0x80000000) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFFFFFFFF) + 1);
-				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(DWORD32);  //操作数长度
+					Offset = ((Offset ^ 0xFFFFFFFF) + 1)*-1;
+				DisasmPoint->CurMemAddr = DisasmPoint->CurMemAddr + sizeof(DWORD32);  //操作数长度
 				break;
 			case OT__q:
 				if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66) goto INT_4;
 			INT_8:
-				Offset = *(DWORD64*)DisasmPoint->CurrentAddr;
+				Offset = *(DWORD64*)DisasmPoint->CurMemAddr;
 				if ((Offset & 0x8000000000000000) && (GET_ADDRES_TYPE(OperandInt, i) == AT__J))
-					Offset = -((Offset ^ 0xFFFFFFFFFFFFFFFF) + 1);
-				DisasmPoint->CurrentAddr = DisasmPoint->CurrentAddr + sizeof(DWORD64);  //操作数长度
+					Offset = ((Offset ^ 0xFFFFFFFFFFFFFFFF) + 1)*-1;
+				DisasmPoint->CurMemAddr = DisasmPoint->CurMemAddr + sizeof(DWORD64);  //操作数长度
 				break;
 			case OT__z:
 			case OT__v:
-				if (sizeof(int) == 2) goto INT_2;
-				if (sizeof(int) == 4) goto INT_4;
-				if (sizeof(int) == 8) goto INT_8;
+				if (base == 1) goto INT_2;
+				if (base == 2) goto INT_4;
+				if (base == 3) goto INT_8;
 				break;
 			}
-			DWORD CurrentAddr = DisasmPoint->CurrentAddr - DisasmPoint->FileStartOfCode + DisasmPoint->BaseOfCode + DisasmPoint->BaseOfImage;
-			sprintf(DisasmResult->FirstOperand, "%08X", CurrentAddr + Offset);
+			//TODO 此处只适合固定基址的情况，重定位的时候需要修改
+			UINT64 CurrentAddr = DisasmPoint->CurMemAddr - DisasmPoint->FileStartOfCode + DisasmPoint->VirtualAddress + DisasmPoint->BaseOfImage;
+			switch (DisasmPoint->PlatForm)
+			{
+			case PLATFORM_16BIT:
+				sprintf(DisasmResult->Operand[i], "%04X", (USHORT)(CurrentAddr + Offset));
+				break;
+			case PLATFORM_32BIT:
+				sprintf(DisasmResult->Operand[i], "%08X", (UINT)(CurrentAddr + Offset));
+				break;
+			case PLATFORM_64BIT:
+				sprintf(DisasmResult->Operand[i], "%016llX", CurrentAddr + Offset);
+				break;
+			}
 			//将当前地址加入待解析地址中
 			if (code == 0xe8 || code == 0xe9 || code == 0xeb || (code & 0x70) == 0x70)
 			{
-				FuncAdd(CurrentAddr + Offset - DisasmPoint->BaseOfImage);
+				PushDisasmFuncAddr((LPVOID)(CurrentAddr + Offset - DisasmPoint->BaseOfImage));
 				char str[64] = { 0 };
 				//sprintf(str, "%x %X\n", code, CurrentAddr + Offset - DisasmPoint->BaseOfImage);
 				//printf(str);
@@ -482,8 +981,17 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 			break;
 		}
 		case AT__O:
-			sprintf(OperandArr[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(DWORD32*)DisasmPoint->CurrentAddr);
-			DisasmPoint->CurrentAddr += 4; //当前操作数
+			//这个类型只在 mov 中使用   如果是64位，则地址需要改成64位大小
+			if (DisasmPoint->PlatForm == PLATFORM_32BIT)
+			{
+				sprintf(DisasmResult->Operand[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4; //当前操作数
+			}
+			else //64位
+			{
+				sprintf(DisasmResult->Operand[i], "%s[0x%X]", GetNumbericType(DisasmResult, base), *(UINT64*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 8; //当前操作数
+			}
 			break;
 		}
 	}
@@ -493,17 +1001,15 @@ bool Disasm::Disasm_reg_or_imm(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 bool Disasm::Disasm_ModRM(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	DisasmPoint->CurrentAddr += 1; //Opcode 字节
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	DisasmPoint->CurMemAddr += 1; //Opcode 字节
 
 	int base = 0;
-	char* OperandArr[] = { DisasmResult->FirstOperand, DisasmResult->SecondOperand,DisasmResult->ThirdOperand,DisasmResult->ForthOperand }; //方便循环操作
-
 		//解析ModRM字节
-	UCHAR ModRMByte = *(UCHAR*)DisasmPoint->CurrentAddr;
-	DisasmPoint->CurrentAddr += 1;  //ModRm 字节
+	UCHAR ModRMByte = *(UCHAR*)DisasmPoint->CurMemAddr;
+	DisasmPoint->CurMemAddr += 1;  //ModRm 字节
 	char SibStr[64] = { 0 };
-	UCHAR SIBByte = *(UCHAR*)DisasmPoint->CurrentAddr;
+	UCHAR SIBByte = *(UCHAR*)DisasmPoint->CurMemAddr;
 	DWORD len = 0;
 
 	//设置段前缀
@@ -548,9 +1054,8 @@ bool Disasm::Disasm_ModRM(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoin
 			base = OPERAND_DOUBLE_WORD; 
 			break;
 		case OT__z:
-			if (sizeof(int) == 4) base = OPERAND_DOUBLE_WORD;
-			else if (sizeof(int) == 2) base = OPERAND_WORD;
-			else if (sizeof(int) == 8) base = OPERAND_QUAD_WORD;
+			if (sizeof(LPVOID) == 2) base = OPERAND_WORD;
+			else base = OPERAND_DOUBLE_WORD;
 			break;
 		case OT__ss:break;
 		case OT__x:break;
@@ -569,51 +1074,52 @@ LOOP_OUT:
 		
 		//操作数大小前缀
 		int OperandPrefix = 0;
-		if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66) OperandPrefix = 1;
+		if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)OperandPrefix = -1;
+		else if(DisasmResult->PrefixState&PREFIX_REX_W) OperandPrefix = 1;
 
 		//明确当前需要获取的是 MomRm信息 还是 REG 信息
 		switch (GET_ADDRES_TYPE(((str_map_code*)DisasmResult->CodeMap + code)->Operand, i))
 		{
 		case AT__G: //reg:通用寄存器
-				sprintf(OperandArr[i], "%s", gRegister[((ModRMByte & 0b111000) >> 3) + (base - OperandPrefix) * RG__MAX]);
+				sprintf(DisasmResult->Operand[i], "%s", gRegister[((ModRMByte & 0b111000) >> 3) + (base + OperandPrefix) * RG__MAX]);
 				break;
 		case AT__I:  //立即数
 			switch (base)
 			{
 			case 0:
 BBB_0:
-				if (*(UCHAR*)DisasmPoint->CurrentAddr & 0x80)
-					sprintf(OperandArr[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurrentAddr ^ 0xFF) + 1);
+				if (*(UCHAR*)DisasmPoint->CurMemAddr & 0x80)
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(UCHAR*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 1;
+					sprintf(DisasmResult->Operand[i], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 1;
 				break;
 			case 1:
-				if (OperandPrefix) goto BBB_0;
+				if (OperandPrefix<0) goto BBB_0;
 BBB_1:
-				if (*(USHORT*)DisasmPoint->CurrentAddr & 0x8000)
-					sprintf(OperandArr[i], "-0x%X", (*(USHORT*)DisasmPoint->CurrentAddr ^ 0xFFFF) + 1);
+				if (*(USHORT*)DisasmPoint->CurMemAddr & 0x8000)
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(USHORT*)DisasmPoint->CurMemAddr ^ 0xFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(USHORT*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 2;
+					sprintf(DisasmResult->Operand[i], "0x%X", *(USHORT*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 2;
 				break;
 			case 2:
-				if (OperandPrefix) goto BBB_1;
+				if (OperandPrefix < 0) goto BBB_1;
 BBB_2:
-				if (*(DWORD32*)DisasmPoint->CurrentAddr & 0x80000000)
-					sprintf(OperandArr[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurrentAddr ^ 0xFFFFFFFF) + 1);
+				if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
+					sprintf(DisasmResult->Operand[i], "-0x%X", (*(DWORD32*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%X", *(DWORD32*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 4;
+					sprintf(DisasmResult->Operand[i], "0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4;
 				break;
 			case 3:
-				if (OperandPrefix) goto BBB_2;
+				if (OperandPrefix < 0) goto BBB_2;
 BBB_3:
-				if (*(DWORD64*)DisasmPoint->CurrentAddr & 0x8000000000000000)
-					sprintf(OperandArr[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurrentAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
+				if (*(DWORD64*)DisasmPoint->CurMemAddr & 0x8000000000000000)
+					sprintf(DisasmResult->Operand[i], "-0x%llX", (*(DWORD64*)DisasmPoint->CurMemAddr ^ 0xFFFFFFFFFFFFFFFF) + 1);
 				else
-					sprintf(OperandArr[i], "0x%llX", *(DWORD64*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 8;
+					sprintf(DisasmResult->Operand[i], "0x%llX", *(DWORD64*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 8;
 				break;
 			}
 			break;
@@ -626,15 +1132,15 @@ BBB_3:
 				{
 				case 0b100://SIB
 					Disasm_SIB(DisasmResult, DisasmPoint, &len, SibStr);
-					sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr);
-					DisasmPoint->CurrentAddr += len;
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
+					DisasmPoint->CurMemAddr += len;
 					break;
 				case 0b101:
-					sprintf((char*)*(OperandArr + i), "%s[0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), *(DWORD32*)DisasmPoint->CurrentAddr);
-					DisasmPoint->CurrentAddr += 4;  //32位偏移字节
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), *(DWORD32*)DisasmPoint->CurMemAddr);
+					DisasmPoint->CurMemAddr += 4;  //32位偏移字节
 					break;
 				default:
-					sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base - OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm * RG__MAX]);
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm * RG__MAX]);
 				}
 				break;
 			case 0b01000000:
@@ -642,22 +1148,22 @@ BBB_3:
 				{
 				case 0x4://SIB
 					Disasm_SIB(DisasmResult, DisasmPoint, &len, SibStr);
-					DisasmPoint->CurrentAddr += len;
+					DisasmPoint->CurMemAddr += len;
 					if ((SIBByte & 0b111) == 0b0101) //SIB字节包含偏移则 此处不需要加偏移
-						sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
 					else
-						if(*(UCHAR*)DisasmPoint->CurrentAddr&0x80)
-							sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr, (*(UCHAR*)DisasmPoint->CurrentAddr^0xFF)+1);
+						if(*(UCHAR*)DisasmPoint->CurMemAddr&0x80)
+							sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (*(UCHAR*)DisasmPoint->CurMemAddr^0xFF)+1);
 						else
-							sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurrentAddr);
-						DisasmPoint->CurrentAddr += 1;
+							sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurMemAddr);
+						DisasmPoint->CurMemAddr += 1;
 					break;
 				default:
-					if (*(UCHAR*)DisasmPoint->CurrentAddr & 0x80)
-						sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base- OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], (*(UCHAR*)DisasmPoint->CurrentAddr ^ 0xFF) + 1);
+					if (*(UCHAR*)DisasmPoint->CurMemAddr & 0x80)
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
 					else
-						sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(UCHAR*)DisasmPoint->CurrentAddr);
-					DisasmPoint->CurrentAddr += 1;// 8位偏移字节
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(UCHAR*)DisasmPoint->CurMemAddr);
+					DisasmPoint->CurMemAddr += 1;// 8位偏移字节
 				}
 				break;
 			case 0b10000000:
@@ -665,37 +1171,37 @@ BBB_3:
 				{
 				case 0x4: //SIB
 					Disasm_SIB(DisasmResult, DisasmPoint, &len, SibStr);
-					DisasmPoint->CurrentAddr += len;
+					DisasmPoint->CurMemAddr += len;
 					if ((SIBByte & 0b111) == 0b0101) //SIB字节包含偏移则 此处不需要加偏移
-						sprintf((char*)*(OperandArr + i), "%s[%s]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr);
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr);
 					else
 						if(base==0)
 						{
-							if(*(UCHAR*)DisasmPoint->CurrentAddr&0xFF)
-								sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr, (0xFF^*(UCHAR*)DisasmPoint->CurrentAddr)+1);
+							if(*(UCHAR*)DisasmPoint->CurMemAddr&0xFF)
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (0xFF^*(UCHAR*)DisasmPoint->CurMemAddr)+1);
 							else
-								sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurrentAddr);
-							DisasmPoint->CurrentAddr += 1;
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(UCHAR*)DisasmPoint->CurMemAddr);
+							DisasmPoint->CurMemAddr += 1;
 						}
 						else if(base==2)
 						{
-							if (*(DWORD32*)DisasmPoint->CurrentAddr & 0x80000000)
-								sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr, (0xFFFFFFFF^*(DWORD32*)DisasmPoint->CurrentAddr)+1);
+							if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, (0xFFFFFFFF^*(DWORD32*)DisasmPoint->CurMemAddr)+1);
 							else
-								sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), SibStr, *(DWORD32*)DisasmPoint->CurrentAddr);
-							DisasmPoint->CurrentAddr += 4;
+								sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), SibStr, *(DWORD32*)DisasmPoint->CurMemAddr);
+							DisasmPoint->CurMemAddr += 4;
 						}
 					break;
 				default:
-					if (*(DWORD32*)DisasmPoint->CurrentAddr & 0x80000000)
-						sprintf((char*)*(OperandArr + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base - OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX],(0xFFFFFFFF^ *(DWORD32*)DisasmPoint->CurrentAddr)+1);
+					if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
+						sprintf((char*)*(DisasmResult->Operand + i), "%s[%s-0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX],(0xFFFFFFFF^ *(DWORD32*)DisasmPoint->CurMemAddr)+1);
 					else
-					sprintf((char*)*(OperandArr + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base-OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(DWORD32*)DisasmPoint->CurrentAddr);
-					DisasmPoint->CurrentAddr += 4;  //32位偏移字节
+					sprintf((char*)*(DisasmResult->Operand + i), "%s[%s+0x%X]", GetNumbericType(DisasmResult, base + OperandPrefix), gRegister[(ModRMByte & 0x7) + DisasmPoint->PlatForm  * RG__MAX], *(DWORD32*)DisasmPoint->CurMemAddr);
+					DisasmPoint->CurMemAddr += 4;  //32位偏移字节
 				}
 				break;
 			case 0b11000000:
-				sprintf((char*)*(OperandArr + i), "%s", gRegister[(ModRMByte & 0x7) + (base - OperandPrefix) * RG__MAX]);
+				sprintf((char*)*(DisasmResult->Operand + i), "%s", gRegister[(ModRMByte & 0x7) + (base + OperandPrefix) * RG__MAX]);
 				break;
 			}
 			break;
@@ -703,7 +1209,7 @@ BBB_3:
 		case AT__W: break; //xmm ymm sib内存
 		case AT__U: break; //rm:xmm ymm
 		case AT__R: break; //rm:通用寄存器
-			sprintf(OperandArr[i], "%s", gRegister[(ModRMByte & 0b111) + (base - OperandPrefix) * RG__MAX]);
+			sprintf(DisasmResult->Operand[i], "%s", gRegister[(ModRMByte & 0b111) + (base + OperandPrefix) * RG__MAX]);
 			break;
 		case AT__Q: break; // xmm ymm sib内存
 		case AT__C: break; //reg:控制寄存器
@@ -717,17 +1223,17 @@ BBB_3:
 				//TODO 非法操作
 				break;
 			default:
-				sprintf(OperandArr[i], "cr%d", ModRMByte & 0b111);
+				sprintf(DisasmResult->Operand[i], "cr%d", ModRMByte & 0b111);
 				break;
 			}
 			break;
 		case AT__D: break; //reg:调试寄存器
-			sprintf(OperandArr[i], "dr%d", ModRMByte & 0b111);
+			sprintf(DisasmResult->Operand[i], "dr%d", ModRMByte & 0b111);
 			break;
 		case AT__N: break; //rm:xmm ymm
 		case AT__P: break; //reg: xmm ymm
 		case AT__S: break; //reg 段寄存器
-			sprintf(OperandArr[i], "%s", gSegmentRegister[ModRMByte & 0b111]);
+			sprintf(DisasmResult->Operand[i], "%s", gSegmentRegister[ModRMByte & 0b111]);
 			break;
 		}
 
@@ -737,11 +1243,11 @@ BBB_3:
 
 bool Disasm::Disasm_SIB(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, PDWORD Len, char* SIBStr)
 {
-	UCHAR SIB_Byte = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR Mom_Byte = *(UCHAR*)(DisasmPoint->CurrentAddr - 1);
+	UCHAR SIB_Byte = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR Mom_Byte = *(UCHAR*)(DisasmPoint->CurMemAddr - 1);
 
 	UCHAR Scale[][4] = { "","*2","*4","*8" };
-	DisasmPoint->CurrentAddr += 1; //SIB 字节
+	DisasmPoint->CurMemAddr += 1; //SIB 字节
 	if ((SIB_Byte & 0b111000) == 0b100000)  //index 为 none
 	{
 		if ((SIB_Byte & 0b111) == 0b101) //base 包含偏移
@@ -749,30 +1255,30 @@ bool Disasm::Disasm_SIB(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint,
 			switch (Mom_Byte & 0b11000000)
 			{
 			case 0b00000000:  //32位偏移
-				sprintf(SIBStr, "0x%X", *(DWORD*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 4;
+				sprintf(SIBStr, "0x%X", *(DWORD*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4;
 				break;
 			case 0b01000000: // 8位偏移+ebp
-				if(*(UCHAR*)DisasmPoint->CurrentAddr&0x80)
-					sprintf(SIBStr, "ebp-0x%X", (0xFF^*(UCHAR*)DisasmPoint->CurrentAddr)+1);
+				if(*(UCHAR*)DisasmPoint->CurMemAddr&0x80)
+					sprintf(SIBStr, "ebp-0x%X", (0xFF^*(UCHAR*)DisasmPoint->CurMemAddr)+1);
 				else
-					sprintf(SIBStr, "ebp+0x%X", *(UCHAR*)DisasmPoint->CurrentAddr);
+					sprintf(SIBStr, "ebp+0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
 				DisasmResult->SIB_Prefix = PREFIX_Seg_SS_36;
-				DisasmPoint->CurrentAddr += 1;
+				DisasmPoint->CurMemAddr += 1;
 				break;
 			case 0b10000000:// 32位偏移+ebp
-				if (*(DWORD32*)DisasmPoint->CurrentAddr & 0x80000000)
-					sprintf(SIBStr, "ebp-0x%X", (0xFFFFFFFF^*(DWORD32*)DisasmPoint->CurrentAddr)+1);
+				if (*(DWORD32*)DisasmPoint->CurMemAddr & 0x80000000)
+					sprintf(SIBStr, "ebp-0x%X", (0xFFFFFFFF^*(DWORD32*)DisasmPoint->CurMemAddr)+1);
 				else
-					sprintf(SIBStr, "ebp+0x%X", *(DWORD32*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 4;
+					sprintf(SIBStr, "ebp+0x%X", *(DWORD32*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4;
 				DisasmResult->SIB_Prefix = PREFIX_Seg_SS_36;
 				break;
 			}
 		}
 		else
 		{
-			sprintf(SIBStr, "%s", gRegister[SIB_Byte & 0b111 + DisasmPoint->PlatForm*RG__MAX]);
+			sprintf(SIBStr, "%s", gRegister[(SIB_Byte & 0b111) + DisasmPoint->PlatForm*RG__MAX]);
 		}
 	}
 	else //index 不为 none
@@ -782,26 +1288,26 @@ bool Disasm::Disasm_SIB(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint,
 			switch (Mom_Byte & 0b11000000)
 			{
 			case 0b00000000:  //32位偏移
-				if(*(DWORD*)DisasmPoint->CurrentAddr&0x80000000)
-					sprintf(SIBStr, "%s%s-0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], (0xFFFFFFFF^*(DWORD*)DisasmPoint->CurrentAddr)+1);
+				if(*(DWORD*)DisasmPoint->CurMemAddr&0x80000000)
+					sprintf(SIBStr, "%s%s-0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], (0xFFFFFFFF^*(DWORD*)DisasmPoint->CurMemAddr)+1);
 				else
-					sprintf(SIBStr, "%s%s+0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], *(DWORD*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 4;
+					sprintf(SIBStr, "%s%s+0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], *(DWORD*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4;
 				break;
 			case 0b01000000: // 8位偏移+ebp
-				if(*(UCHAR*)DisasmPoint->CurrentAddr&0x80)
-					sprintf(SIBStr, "ebp+%s%s-0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], (0xFF^*(UCHAR*)DisasmPoint->CurrentAddr)+1);
+				if(*(UCHAR*)DisasmPoint->CurMemAddr&0x80)
+					sprintf(SIBStr, "ebp+%s%s-0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], (0xFF^*(UCHAR*)DisasmPoint->CurMemAddr)+1);
 				else
-					sprintf(SIBStr, "ebp+%s%s+0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], *(UCHAR*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 1;
+					sprintf(SIBStr, "ebp+%s%s+0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], *(UCHAR*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 1;
 				DisasmResult->SIB_Prefix = PREFIX_Seg_SS_36;
 				break;
 			case 0b10000000:// 32位偏移+ebp
-				if (*(DWORD*)DisasmPoint->CurrentAddr & 0x80000000)
-					sprintf(SIBStr, "ebp+%s%s-0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], (0xFFFFFFFF ^ *(DWORD*)DisasmPoint->CurrentAddr) + 1);
+				if (*(DWORD*)DisasmPoint->CurMemAddr & 0x80000000)
+					sprintf(SIBStr, "ebp+%s%s-0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], (0xFFFFFFFF ^ *(DWORD*)DisasmPoint->CurMemAddr) + 1);
 				else
-				sprintf(SIBStr, "ebp+%s%s+0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], *(DWORD*)DisasmPoint->CurrentAddr);
-				DisasmPoint->CurrentAddr += 4;
+				sprintf(SIBStr, "ebp+%s%s+0x%X", gRegister[((SIB_Byte >> 3) & 0b111) + DisasmPoint->PlatForm*RG__MAX], Scale[SIB_Byte >> 6], *(DWORD*)DisasmPoint->CurMemAddr);
+				DisasmPoint->CurMemAddr += 4;
 				DisasmResult->SIB_Prefix = PREFIX_Seg_SS_36;
 				break;
 			}
@@ -824,7 +1330,7 @@ bool Disasm::Disasm_grp_80_83(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 {
 	//TODO 82 64位下未处理
 	char Opcode[][4] = { "add","or","adc","sbb","and","sub","xor","cmp" };
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
@@ -834,10 +1340,10 @@ bool Disasm::Disasm_grp_ff(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoi
 {
 	//TODO 82 64位下未处理
 	char Opcode[][8] = { "inc","dec","call","call","jmp","jmp","push","" };
-	DWORD AddrLenghtFlag = DisasmPoint->CurrentAddr;
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
-	DWORD TmpAddr = DisasmPoint->CurrentAddr + 1;
+	UINT64 StartDisasmAddr = DisasmPoint->CurMemAddr;
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
+	UINT64 TmpAddr = DisasmPoint->CurMemAddr + 1;
 	//修改助记符
 	sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	DisasmResult->OperandNum = 1;
@@ -887,23 +1393,23 @@ bool Disasm::Disasm_grp_ff(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoi
 						{
 							TmpAddr += 1; //加上一个SIB字节
 							DWORD JmpAddr = *(DWORD*)TmpAddr;
-							DisasmResult->CurrentLen = DisasmPoint->CurrentAddr - AddrLenghtFlag;
-							for (UINT i = 0; i < (JmpAddr - DisasmResult->CurrentAddr - DisasmPoint->BaseOfImage - DisasmResult->CurrentLen); i++) //分支表
+							DisasmResult->CurrentLen = UINT(DisasmPoint->CurMemAddr - StartDisasmAddr);
+							for (UINT i = 0; i < (JmpAddr - DisasmResult->CurFileOffset - DisasmPoint->BaseOfImage - DisasmResult->CurrentLen); i++) //分支表
 							{
 								DISASM_RESULT *DisasmReusltTmp = (DisasmResult + i + DisasmResult->CurrentLen);
 
 							}
-							int base = DisasmPoint->CurrentAddr;
+							UINT64 base = DisasmPoint->CurMemAddr;
 							for (int i = 0;; i++) //跳转表
 							{
-								DWORD Addr = *(DWORD*)DisasmPoint->CurrentAddr;
-								if (Addr<(DisasmPoint->BaseOfImage + DisasmPoint->BaseOfCode) || Addr>(DisasmPoint->BaseOfImage + DisasmPoint->LenOfCode))
+								DWORD Addr = *(DWORD*)DisasmPoint->CurMemAddr;
+								if (Addr<(DisasmPoint->BaseOfImage + DisasmPoint->VirtualAddress) || Addr>(DisasmPoint->BaseOfImage + DisasmPoint->LenOfCode))
 									break;
-								DISASM_RESULT *DisasmReusltTmp = (DisasmResult + i + DisasmResult->CurrentLen + (JmpAddr - DisasmResult->CurrentAddr - DisasmPoint->BaseOfImage));
+								DISASM_RESULT *DisasmReusltTmp = (DisasmResult + i + DisasmResult->CurrentLen + (JmpAddr - DisasmResult->CurFileOffset - DisasmPoint->BaseOfImage));
 								DisasmReusltTmp->IsData = true;
-								DisasmReusltTmp->CurrentAddr = JmpAddr + i * sizeof(DWORD) - DisasmPoint->BaseOfImage;
-								memcpy(DisasmReusltTmp->MachineCode, (LPVOID)DisasmPoint->CurrentAddr, sizeof(DWORD));
-								DisasmPoint->CurrentAddr += sizeof(DWORD);
+								DisasmReusltTmp->CurFileOffset = JmpAddr + i * sizeof(DWORD) - DisasmPoint->BaseOfImage;
+								memcpy(DisasmReusltTmp->MachineCode, (LPVOID)DisasmPoint->CurMemAddr, sizeof(DWORD));
+								DisasmPoint->CurMemAddr += sizeof(DWORD);
 								DisasmReusltTmp->CurrentLen = sizeof(DWORD);
 								DisasmReusltTmp->OperandNum = 0;
 
@@ -920,47 +1426,42 @@ bool Disasm::Disasm_RexPrefix(DISASM_RESULT * DisasmResult, DISASM_POINT*  Disas
 {
 	if (DisasmPoint->PlatForm != PLATFORM_64BIT)
 	{
-		UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
+		UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
 		DWORD64 OperandInt = gOneByteCodeMap[code].Operand;
-		sprintf(DisasmResult->FirstOperand, "%s", gRegister[GET_OPERAND_TYPE(OperandInt, 0) + DisasmPoint->PlatForm*RG__MAX]);
-		DisasmPoint->CurrentAddr += 1;
+		sprintf(DisasmResult->Operand[0], "%s", gRegister[GET_OPERAND_TYPE(OperandInt, 0) + DisasmPoint->PlatForm*RG__MAX]);
+		DisasmPoint->CurMemAddr += 1;
+		return true;
 	}
 	else
 	{
-		UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-		DisasmResult->PrefixState |= 1 << (code - PREFIX_REX);
-		DisasmPoint->CurrentAddr += 1;
+		UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+		DisasmResult->PrefixState |= 1 << (code - 0x40);
+		DisasmPoint->CurMemAddr += 1;
+		DisasmResult->Opcode[0] = 0x00;
+		return false;
 	}
-	return true;
 }
 
 bool Disasm::Disasm_ret(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (GET_OPERAND_NUM(gOneByteCodeMap[code].Operand) > 0)
 	{
 		Disasm_reg_or_imm(DisasmResult, DisasmPoint, IsFinished);
 	}
 	else
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 	}
 	*IsFinished = 1;
 	return true;
 }
 
 
-bool Disasm::Disasm_set_prefix(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
-{
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	DisasmResult->PrefixState |= gOneByteCodeMap[code].Operand;
-	DisasmPoint->CurrentAddr += 1;
-	return false;
-}
 bool Disasm::Disasm_grp_c6_c7(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	switch (ModRmByte & 0b00111000)
 	{
@@ -998,8 +1499,8 @@ bool Disasm::Disasm_grp_c6_c7(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 bool Disasm::Disasm_grp_shift(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	char Opcode[][4] = { "rol","ror","rcl","rcr","shl","shr","","sar" };
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	sprintf_s(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	DisasmResult->OperandNum = 2;
@@ -1027,35 +1528,30 @@ bool Disasm::Disasm_grp_shift(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 		//reg imm
 	case 0xc0:
 	case 0xc1:
-		if (*(UCHAR*)DisasmPoint->CurrentAddr & 0x80)
-			sprintf_s(DisasmResult->SecondOperand, "-0x%X", (*(UCHAR*)DisasmPoint->CurrentAddr ^ 0xFF) + 1);
+		if (*(UCHAR*)DisasmPoint->CurMemAddr & 0x80)
+			sprintf_s(DisasmResult->Operand[1], "-0x%X", (*(UCHAR*)DisasmPoint->CurMemAddr ^ 0xFF) + 1);
 		else
-			sprintf_s(DisasmResult->SecondOperand, "0x%X", *(UCHAR*)DisasmPoint->CurrentAddr);
-		DisasmPoint->CurrentAddr += 1;
+			sprintf_s(DisasmResult->Operand[1], "0x%X", *(UCHAR*)DisasmPoint->CurMemAddr);
+		DisasmPoint->CurMemAddr += 1;
 		break;
 		//reg 1
 	case 0xd0:
 	case 0xd1:
-		sprintf_s(DisasmResult->SecondOperand, "1");
+		sprintf_s(DisasmResult->Operand[1], "1");
 		break;
 		//reg cl
 	case 0xd2:
 	case 0xd3:
-		sprintf_s(DisasmResult->SecondOperand, "%s", gRegister[RG8__CL]);
+		sprintf_s(DisasmResult->Operand[1], "%s", gRegister[RG8__CL]);
 		break;
 	}
 	return true;
 }
 
-bool Disasm::Disasm_no_else(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
-{
-	DisasmPoint->CurrentAddr += 1;
-	return true;
-}
 
 bool Disasm::Disasm_pusha(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 	if (DisasmPoint->PlatForm > PLATFORM_16BIT)
 		strcpy_s(DisasmResult->Opcode, "pusha");
 	else
@@ -1063,9 +1559,20 @@ bool Disasm::Disasm_pusha(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoin
 	return true;
 }
 
+bool Disasm::Disasm_0xd5_0xd6(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*((UCHAR*)(DisasmPoint->CurMemAddr) + 1) == 0x0A)
+	{
+		DisasmPoint->CurMemAddr += 2;
+		return true;
+	}
+	else
+		return Disasm_reg_or_imm(DisasmResult, DisasmPoint, IsFinished);
+}
+
 bool Disasm::Disasm_popa(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 	if (DisasmPoint->PlatForm > PLATFORM_16BIT)
 		strcpy_s(DisasmResult->Opcode, "popa");
 	else
@@ -1075,25 +1582,25 @@ bool Disasm::Disasm_popa(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint
 
 bool Disasm::Disasm_pushf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	char Opcode[][7] = { "pushf","pushfd","pushfq" };
+	char Opcode[][7] = { "","pushf","pushfd","pushfq" };
 	strcpy_s(DisasmResult->Opcode, Opcode[DisasmPoint->PlatForm]);
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 	return true;
 }
 
 bool Disasm::Disasm_popf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	char Opcode[][7] = { "popf","popfd","popfq" };
+	char Opcode[][7] = { "","popf","popfd","popfq" };
 	strcpy_s(DisasmResult->Opcode, Opcode[DisasmPoint->PlatForm]);
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 	return true;
 }
 
 bool Disasm::Disasm_grp_f6_f7(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	char Opcode[][7] = { "test","","not","neg","mul","imul","div","idiv" };
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
@@ -1105,14 +1612,14 @@ bool Disasm::Disasm_grp_f6_f7(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 		DisasmResult->OperandNum = 2;
 		if (code == 0xf6)//BYTE
 		{
-			char c = *(char*)DisasmPoint->CurrentAddr;
-			sprintf(DisasmResult->SecondOperand, "0x%X", c); //TODO 负数优化
-			DisasmPoint->CurrentAddr += 1;
+			char c = *(char*)DisasmPoint->CurMemAddr;
+			sprintf(DisasmResult->Operand[1], "0x%X", c); //TODO 负数优化
+			DisasmPoint->CurMemAddr += 1;
 		}
 		else
 		{
-			sprintf(DisasmResult->SecondOperand, "0x%X", *(int*)DisasmPoint->CurrentAddr);
-			DisasmPoint->CurrentAddr += 4;
+			sprintf(DisasmResult->Operand[1], "0x%X", *(int*)DisasmPoint->CurMemAddr);
+			DisasmPoint->CurMemAddr += 4;
 		}
 		break;
 	case 1:
@@ -1127,11 +1634,11 @@ bool Disasm::Disasm_grp_f6_f7(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 		DisasmResult->OperandNum = 2;
 		if (code == 0xF6)
 		{
-			strcpy_s(DisasmResult->SecondOperand, (char*)gRegister[RG8__AL]);
+			strcpy_s(DisasmResult->Operand[1], (char*)gRegister[RG8__AL]);
 		}
 		else
 		{
-			strcpy_s(DisasmResult->SecondOperand, (char*)gRegister[RG__AX + DisasmPoint->PlatForm*RG__MAX]);
+			strcpy_s(DisasmResult->Operand[1], (char*)gRegister[RG__AX + DisasmPoint->PlatForm*RG__MAX]);
 		}
 		break;
 	}
@@ -1141,8 +1648,8 @@ bool Disasm::Disasm_grp_f6_f7(DISASM_RESULT * DisasmResult, DISASM_POINT* Disasm
 bool Disasm::Disasm_grp_fe(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {//TODO 82 64位下未处理
 	char Opcode[][8] = { "inc","dec","","","","","","" };
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	DisasmResult->OperandNum = 1;
@@ -1154,11 +1661,12 @@ bool Disasm::Disasm_grp_fe(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoi
 bool Disasm::Disasm_int(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (code == 0xcc)
 	{
-		sprintf(DisasmResult->FirstOperand, "0x03");
-		DisasmPoint->CurrentAddr += 1;
+		sprintf(DisasmResult->Operand[0], "0x03");
+		DisasmPoint->CurMemAddr += 1;
+		DisasmResult->OperandNum = 1;
 	}
 	else
 	{
@@ -1169,7 +1677,7 @@ bool Disasm::Disasm_int(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint,
 
 bool Disasm::Disasm_reserve(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 	strcpy_s(DisasmResult->Opcode, "reserve opcode");
 	return true;
 }
@@ -1183,7 +1691,7 @@ bool Disasm::Disasm_bound(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoin
 
 bool Disasm::Disasm_0x63(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmPoint->PlatForm == PLATFORM_64BIT)
 	{
 		strcpy_s(DisasmResult->Opcode, "arpl");
@@ -1200,7 +1708,7 @@ bool Disasm::Disasm_0x63(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint
 
 bool Disasm::Disasm_imul(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	DWORD64 OperandInt = gOneByteCodeMap[code].Operand;
 
 	Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
@@ -1211,7 +1719,7 @@ bool Disasm::Disasm_imul(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint
 bool Disasm::Disasm_grp_8f(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	char Opcode[][4] = { "pop","","","","","","","" };
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
@@ -1225,23 +1733,23 @@ bool Disasm::Disasm_0x90(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint
 	else
 		strcpy_s(DisasmResult->Opcode, "nop");
 
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 	return true;
 }
 
 bool Disasm::Disasm_ESC_0xd8(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	char OpCode[][8] = { "fadd" , "fmul" , "fcom" , "fcomp" , "fsub" , "fsubr" , "fdiv" , "fdivr" , };
 	if (ModRmByte > 0xBF)
 	{
 		strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-		strcpy_s(DisasmResult->FirstOperand, "st");
+		strcpy_s(DisasmResult->Operand[0], "st");
 		char tmp[8] = { 0 };
 		sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-		strcpy_s(DisasmResult->SecondOperand, tmp);
-		DisasmPoint->CurrentAddr += 2;
+		strcpy_s(DisasmResult->Operand[1], tmp);
+		DisasmPoint->CurMemAddr += 2;
 		DisasmResult->OperandNum = 2;
 	}
 	else
@@ -1254,8 +1762,8 @@ bool Disasm::Disasm_ESC_0xd8(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xd9(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	char OpCode[][8] = { "fld" , "" , "fst" , "fstp" , "fldenv" , "fldcw" , "fstenv" , "fstcw" , };
 	if (ModRmByte > 0xBF)
 	{
@@ -1266,10 +1774,10 @@ bool Disasm::Disasm_ESC_0xd9(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		case 0xc8:case 0xc9:case 0xca:case 0xcb:case 0xcc:case 0xcd:case 0xce:case 0xcf:
 		{
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmResult->OperandNum = 2;
 			break;
 		}
@@ -1359,7 +1867,7 @@ bool Disasm::Disasm_ESC_0xd9(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 			break;
 
 		}
-		DisasmPoint->CurrentAddr += 2;
+		DisasmPoint->CurMemAddr += 2;
 	}
 	else
 	{
@@ -1371,8 +1879,8 @@ bool Disasm::Disasm_ESC_0xd9(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xda(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (ModRmByte > 0xBF)
 	{
 		char OpCode[][10] = { "fcmovb" , "fcmovbe" , "fcmove" , "fcmovu" };
@@ -1384,14 +1892,14 @@ bool Disasm::Disasm_ESC_0xda(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		else
 		{
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmResult->OperandNum = 2;
 
 		}
-		DisasmPoint->CurrentAddr += 2;
+		DisasmPoint->CurMemAddr += 2;
 	}
 	else
 	{
@@ -1404,8 +1912,8 @@ bool Disasm::Disasm_ESC_0xda(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xdb(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (ModRmByte > 0xBF)
 	{
 		char OpCode[][10] = { "fcmovnb" , "fcmovne" , "fcmovnbe" , "fcmovnu" , "" , "fucomi" , "fcomi" , "" , };
@@ -1422,14 +1930,14 @@ bool Disasm::Disasm_ESC_0xdb(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		else
 		{
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
+			strcpy_s(DisasmResult->Operand[1], tmp);
 			DisasmResult->OperandNum = 2;
 
 		}
-		DisasmPoint->CurrentAddr += 2;
+		DisasmPoint->CurMemAddr += 2;
 	}
 	else
 	{
@@ -1442,17 +1950,17 @@ bool Disasm::Disasm_ESC_0xdb(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xdc(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (ModRmByte > 0xBF)
 	{
 		char OpCode[][8] = { "fadd" , "fmul" , "" , "" , "fsubr" , "fsub" , "fdivr" , "fdiv" , };
 		strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-		strcpy_s(DisasmResult->SecondOperand, "st");
+		strcpy_s(DisasmResult->Operand[1], "st");
 		char tmp[8] = { 0 };
 		sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-		strcpy_s(DisasmResult->FirstOperand, tmp);
-		DisasmPoint->CurrentAddr += 2;
+		strcpy_s(DisasmResult->Operand[0], tmp);
+		DisasmPoint->CurMemAddr += 2;
 		DisasmResult->OperandNum = 2;
 	}
 	else
@@ -1466,25 +1974,25 @@ bool Disasm::Disasm_ESC_0xdc(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xdd(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (ModRmByte > 0xBF)
 	{
 		char OpCode[][8] = { "ffree" , "" , "fst" , "fstp" , "fucom" , "fucomp" , "" , "" , };
 		strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
 		char tmp[8] = { 0 };
 		sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-		strcpy_s(DisasmResult->FirstOperand, tmp);
+		strcpy_s(DisasmResult->Operand[0], tmp);
 		if (ModRmByte & 0xE0)
 		{
-			strcpy_s(DisasmResult->SecondOperand, "st");
+			strcpy_s(DisasmResult->Operand[1], "st");
 			DisasmResult->OperandNum = 2;
 		}
 		else
 		{
 			DisasmResult->OperandNum = 1;
 		}
-		DisasmPoint->CurrentAddr += 2;
+		DisasmPoint->CurMemAddr += 2;
 	}
 	else
 	{
@@ -1497,8 +2005,8 @@ bool Disasm::Disasm_ESC_0xdd(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xde(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (ModRmByte > 0xBF)
 	{
 		if (ModRmByte == 0xD9)
@@ -1510,11 +2018,11 @@ bool Disasm::Disasm_ESC_0xde(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 		{
 			char OpCode[][8] = { "faddp" , "fmulp" , "" , "" , "fsubrp" , "fsubp" , "fdivrp" , "fdivp" , };
 			strcpy_s(DisasmResult->Opcode, OpCode[(ModRmByte - 0xC0) / 8]);
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
-			DisasmPoint->CurrentAddr += 2;
+			strcpy_s(DisasmResult->Operand[1], tmp);
+			DisasmPoint->CurMemAddr += 2;
 			DisasmResult->OperandNum = 2;
 		}
 	}
@@ -1529,8 +2037,8 @@ bool Disasm::Disasm_ESC_0xde(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_ESC_0xdf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)DisasmPoint->CurrentAddr;
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)DisasmPoint->CurMemAddr;
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (ModRmByte > 0xBF)
 	{
 		if (ModRmByte == 0xE0)
@@ -1543,11 +2051,11 @@ bool Disasm::Disasm_ESC_0xdf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 				strcpy_s(DisasmResult->Opcode, "fucomip");
 			else if (ModRmByte & 0xF0)
 				strcpy_s(DisasmResult->Opcode, "fcomip");
-			strcpy_s(DisasmResult->FirstOperand, "st");
+			strcpy_s(DisasmResult->Operand[0], "st");
 			char tmp[8] = { 0 };
 			sprintf(tmp, "st(%d)", (ModRmByte - 0xC0) % 8);
-			strcpy_s(DisasmResult->SecondOperand, tmp);
-			DisasmPoint->CurrentAddr += 2;
+			strcpy_s(DisasmResult->Operand[1], tmp);
+			DisasmPoint->CurMemAddr += 2;
 			DisasmResult->OperandNum = 2;
 		}
 	}
@@ -1562,9 +2070,9 @@ bool Disasm::Disasm_ESC_0xdf(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_two_opcode(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	//先拷贝助记符  部分指令在函数里面修改助记符
 	if (TwoByteCodeMap[code].OpStr)
 		strcpy_s(DisasmResult->Opcode, TwoByteCodeMap[code].OpStr);
@@ -1574,10 +2082,69 @@ bool Disasm::Disasm_two_opcode(DISASM_RESULT * DisasmResult, DISASM_POINT* Disas
 	return true;
 }
 
+bool Disasm::Disasm_Exception(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_0x98(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	switch (DisasmPoint->PlatForm)
+	{
+	case PLATFORM_16BIT: strcpy_s(DisasmResult->Opcode, "cbw"); break;
+	case PLATFORM_32BIT: strcpy_s(DisasmResult->Opcode, "cwde"); break;
+	case PLATFORM_64BIT: 
+		if(DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "cdqe");
+		else
+			strcpy_s(DisasmResult->Opcode, "cwde");
+		break;
+	}
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_0x99(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	switch (DisasmPoint->PlatForm)
+	{
+	case PLATFORM_16BIT: strcpy_s(DisasmResult->Opcode, "cwd"); break;
+	case PLATFORM_32BIT: strcpy_s(DisasmResult->Opcode, "cdq"); break;
+	case PLATFORM_64BIT:
+		if (DisasmResult->PrefixState&PREFIX_REX_W)
+			strcpy_s(DisasmResult->Opcode, "cqo");
+		else
+			strcpy_s(DisasmResult->Opcode, "cdq");
+		break;
+	}
+	DisasmPoint->CurMemAddr += 1;
+	return true;
+}
+
+bool Disasm::Disasm_0x6c_0x6d(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
+{
+	if (*(UCHAR*)(DisasmPoint->CurMemAddr) == 0x6c)
+	{
+
+	}
+	else
+	{
+		if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
+			strcpy_s(DisasmResult->Opcode, "insw");
+		else
+			strcpy_s(DisasmResult->Opcode, "insd");
+		DisasmPoint->CurMemAddr += 1;
+	}
+	return true;
+}
+
+
+
 bool Disasm::Disasm_TWO_grp_0x00(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
 	char Opcode[][8] = { "sldt","str","lldt","ltr","verr","verw","","" };
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	//修改助记符
 	sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
 	Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
@@ -1586,41 +2153,41 @@ bool Disasm::Disasm_TWO_grp_0x00(DISASM_RESULT * DisasmResult, DISASM_POINT* Dis
 
 bool Disasm::Disasm_TWO_grp_0x01(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
-	if (((ModRmByte >> 5) & 3) == 3)
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
+	if (((ModRmByte >> 6) & 3) == 3)
 	{
 		switch ((ModRmByte >> 3) & 7)
 		{
 		case 0:
 		{
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 			char Opcode[][10] = { "","vmcall","vmlaunch","vmresume","vmxoff","","","" };
 			strcpy_s(DisasmResult->Opcode, Opcode[ModRmByte & 3]);
 			return true;
 		}
 		case 1:
 		{
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 			char Opcode[][10] = { "monitor","mwait","clac","stac","","","","encls" };
 			strcpy_s(DisasmResult->Opcode, Opcode[ModRmByte & 3]);
 			return true;
 		}
 		case 2:
 		{
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 			char Opcode[][10] = { "xgetbv","xsetbv","","","vmfunc","xend","xtest","enclu" };
 			strcpy_s(DisasmResult->Opcode, Opcode[ModRmByte & 3]);
 			return true;
 		}
 		case 3:
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 			return true;
 		case 5:
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 			return true;
 		case 7:
 		{
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 			char Opcode[][10] = { "swapgs","rdtscp","","","","","","" };
 			strcpy_s(DisasmResult->Opcode, Opcode[ModRmByte & 3]);
 			return true;
@@ -1636,8 +2203,8 @@ bool Disasm::Disasm_TWO_grp_0x01(DISASM_RESULT * DisasmResult, DISASM_POINT* Dis
 
 bool Disasm::Disasm_TWO_grp_0xae(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	if (((ModRmByte >> 5) & 3) == 3)
 	{
 		if (DisasmResult->PrefixState&PREFIX_Repe_F3)
@@ -1651,7 +2218,7 @@ bool Disasm::Disasm_TWO_grp_0xae(DISASM_RESULT * DisasmResult, DISASM_POINT* Dis
 			char Opcode[][10] = { "","","","","","lfence","mfence","sfence" };
 			//修改助记符
 			sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
-			DisasmPoint->CurrentAddr += 1;
+			DisasmPoint->CurMemAddr += 1;
 		}
 	}
 	else
@@ -1659,14 +2226,14 @@ bool Disasm::Disasm_TWO_grp_0xae(DISASM_RESULT * DisasmResult, DISASM_POINT* Dis
 		char Opcode[][10] = { "fxsave","fxstor","ldmxcsr","stmxcsr","xsave","xrstor","xsaveopt","clflush" };
 		//修改助记符
 		sprintf(DisasmResult->Opcode, "%s", Opcode[(ModRmByte >> 3) & 7]);
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 	}
 	return true;
 }
 
 bool Disasm::Disasm_TWO_0xbx(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
 		switch (code)
@@ -1705,7 +2272,7 @@ bool Disasm::Disasm_TWO_0xbx(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmP
 
 bool Disasm::Disasm_TWO_0x6x_0xdx_0xex_0xfx(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	switch (code) //几个特殊处理
 	{
 	case 0x6e:
@@ -1905,9 +2472,9 @@ bool Disasm::Disasm_TWO_0x6x_0xdx_0xex_0xfx(DISASM_RESULT * DisasmResult, DISASM
 
 bool Disasm::Disasm_TWO_three_opcode38(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	//先拷贝助记符  部分指令在函数里面修改助记符
 	if (ThreeByteCodeMap38[code].OpStr)
 		strcpy_s(DisasmResult->Opcode, ThreeByteCodeMap38[code].OpStr);
@@ -1919,9 +2486,9 @@ bool Disasm::Disasm_TWO_three_opcode38(DISASM_RESULT * DisasmResult, DISASM_POIN
 
 bool Disasm::Disasm_TWO_three_opcode3A(DISASM_RESULT * DisasmResult, DISASM_POINT* DisasmPoint, int * IsFinished)
 {
-	DisasmPoint->CurrentAddr += 1;
+	DisasmPoint->CurMemAddr += 1;
 
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	//先拷贝助记符  部分指令在函数里面修改助记符
 	if (ThreeByteCodeMap3A[code].OpStr)
 		strcpy_s(DisasmResult->Opcode, ThreeByteCodeMap3A[code].OpStr);
@@ -1933,7 +2500,7 @@ bool Disasm::Disasm_TWO_three_opcode3A(DISASM_RESULT * DisasmResult, DISASM_POIN
 
 bool Disasm::Disasm_TWO_0x10(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovupd");
@@ -1959,7 +2526,7 @@ bool Disasm::Disasm_TWO_0x10(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x11(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovupd");
@@ -1985,7 +2552,7 @@ bool Disasm::Disasm_TWO_0x11(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x12(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovlpd");
@@ -2011,21 +2578,21 @@ bool Disasm::Disasm_TWO_0x12(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x13(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovlps");
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2038,21 +2605,21 @@ bool Disasm::Disasm_TWO_0x13(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x14(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vunpcklpd");
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2065,21 +2632,21 @@ bool Disasm::Disasm_TWO_0x14(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x15(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vunpckhpd");
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2092,7 +2659,7 @@ bool Disasm::Disasm_TWO_0x15(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x16(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovhpd");
@@ -2106,7 +2673,7 @@ bool Disasm::Disasm_TWO_0x16(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2120,21 +2687,21 @@ bool Disasm::Disasm_TWO_0x16(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x17(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovhpd");
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2147,9 +2714,9 @@ bool Disasm::Disasm_TWO_0x17(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_grp_16(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
-	DisasmPoint->CurrentAddr += 2; // 操作码字节和mod字节
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
+	DisasmPoint->CurMemAddr += 2; // 操作码字节和mod字节
 	if (((ModRmByte >> 5) & 3) == 3)
 	{
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
@@ -2179,8 +2746,8 @@ bool Disasm::Disasm_TWO_grp_16(DISASM_RESULT * DisasmResult, DISASM_POINT * Disa
 
 bool Disasm::Disasm_TWO_0x1a(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	DisasmPoint->CurrentAddr += 1;
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	DisasmPoint->CurMemAddr += 1;
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "bndmov");
@@ -2203,8 +2770,8 @@ bool Disasm::Disasm_TWO_0x1a(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x1b(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	DisasmPoint->CurrentAddr += 1;
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	DisasmPoint->CurMemAddr += 1;
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "bndmov");
@@ -2227,7 +2794,7 @@ bool Disasm::Disasm_TWO_0x1b(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x28(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovapd");
@@ -2235,7 +2802,7 @@ bool Disasm::Disasm_TWO_0x28(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2|| DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2249,7 +2816,7 @@ bool Disasm::Disasm_TWO_0x28(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x29(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovapd");
@@ -2257,7 +2824,7 @@ bool Disasm::Disasm_TWO_0x29(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2271,7 +2838,7 @@ bool Disasm::Disasm_TWO_0x29(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x2a(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "cvtpi2pd");
@@ -2297,7 +2864,7 @@ bool Disasm::Disasm_TWO_0x2a(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x2b(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovntpd");
@@ -2305,7 +2872,7 @@ bool Disasm::Disasm_TWO_0x2b(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2319,7 +2886,7 @@ bool Disasm::Disasm_TWO_0x2b(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x2c(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "cvttpd2pi");
@@ -2345,7 +2912,7 @@ bool Disasm::Disasm_TWO_0x2c(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x2d(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "cvttpd2pi");
@@ -2371,7 +2938,7 @@ bool Disasm::Disasm_TWO_0x2d(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x2e_0x2f(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		if(code==0x2e)
@@ -2382,7 +2949,7 @@ bool Disasm::Disasm_TWO_0x2e_0x2f(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2399,7 +2966,7 @@ bool Disasm::Disasm_TWO_0x2e_0x2f(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 
 bool Disasm::Disasm_TWO_0x50(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovmskpd");
@@ -2407,7 +2974,7 @@ bool Disasm::Disasm_TWO_0x50(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2421,7 +2988,7 @@ bool Disasm::Disasm_TWO_0x50(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x51(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vsqrtpd");
@@ -2447,7 +3014,7 @@ bool Disasm::Disasm_TWO_0x51(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x52_0x53(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
 		if(code==0x51)
@@ -2458,7 +3025,7 @@ bool Disasm::Disasm_TWO_0x52_0x53(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2475,7 +3042,7 @@ bool Disasm::Disasm_TWO_0x52_0x53(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 
 bool Disasm::Disasm_TWO_0x54_0x55_0x56_0x57(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		switch (code)
@@ -2489,7 +3056,7 @@ bool Disasm::Disasm_TWO_0x54_0x55_0x56_0x57(DISASM_RESULT * DisasmResult, DISASM
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2509,7 +3076,7 @@ bool Disasm::Disasm_TWO_0x54_0x55_0x56_0x57(DISASM_RESULT * DisasmResult, DISASM
 
 bool Disasm::Disasm_TWO_0x58_0x59_0x5c_0x5d_0x5e_0x5f(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		switch (code)
@@ -2567,7 +3134,7 @@ bool Disasm::Disasm_TWO_0x58_0x59_0x5c_0x5d_0x5e_0x5f(DISASM_RESULT * DisasmResu
 
 bool Disasm::Disasm_TWO_0x5a(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vcvtpd2ps");
@@ -2593,7 +3160,7 @@ bool Disasm::Disasm_TWO_0x5a(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x5b(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vcvtps2dq");
@@ -2606,7 +3173,7 @@ bool Disasm::Disasm_TWO_0x5b(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2620,7 +3187,7 @@ bool Disasm::Disasm_TWO_0x5b(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x70(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vpshufd");
@@ -2646,8 +3213,8 @@ bool Disasm::Disasm_TWO_0x70(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_grp12_grp13_grp14(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	BOOL IsValidCode = false;
 	if (((ModRmByte >> 5) & 3) == 3)
 	{
@@ -2743,7 +3310,7 @@ bool Disasm::Disasm_TWO_grp12_grp13_grp14(DISASM_RESULT * DisasmResult, DISASM_P
 	}
 	if (IsValidCode == false)
 	{
-		DisasmPoint->CurrentAddr += 2;
+		DisasmPoint->CurMemAddr += 2;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -2752,7 +3319,7 @@ bool Disasm::Disasm_TWO_grp12_grp13_grp14(DISASM_RESULT * DisasmResult, DISASM_P
 
 bool Disasm::Disasm_TWO_0x74_0x75_0x76(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vpcmpeqb");
@@ -2760,7 +3327,7 @@ bool Disasm::Disasm_TWO_0x74_0x75_0x76(DISASM_RESULT * DisasmResult, DISASM_POIN
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2|| DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2779,7 +3346,7 @@ bool Disasm::Disasm_TWO_0x77(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x7c_0x7d(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		if(code==0x7c)
@@ -2798,7 +3365,7 @@ bool Disasm::Disasm_TWO_0x7c_0x7d(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 	}
 	else
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2809,7 +3376,7 @@ bool Disasm::Disasm_TWO_0x7c_0x7d(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 
 bool Disasm::Disasm_TWO_0x7e(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovd"); //TODO
@@ -2817,7 +3384,7 @@ bool Disasm::Disasm_TWO_0x7e(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 )
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2836,7 +3403,7 @@ bool Disasm::Disasm_TWO_0x7e(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0x7f(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vmovdqa"); //TODO
@@ -2844,7 +3411,7 @@ bool Disasm::Disasm_TWO_0x7f(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2863,12 +3430,12 @@ bool Disasm::Disasm_TWO_0x7f(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0xc0_0xc1_0xc3(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66 
 		|| DisasmResult->PrefixState&PREFIX_Repne_F2
 		|| DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2886,7 +3453,7 @@ bool Disasm::Disasm_TWO_0xc0_0xc1_0xc3(DISASM_RESULT * DisasmResult, DISASM_POIN
 
 bool Disasm::Disasm_TWO_0xc2(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vcmppd"); //TODO
@@ -2914,7 +3481,7 @@ bool Disasm::Disasm_TWO_0xc2(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0xc4(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vpinsrw"); //TODO
@@ -2923,7 +3490,7 @@ bool Disasm::Disasm_TWO_0xc4(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2|| DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2937,7 +3504,7 @@ bool Disasm::Disasm_TWO_0xc4(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0xc5(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vpextrw"); //TODO
@@ -2945,7 +3512,7 @@ bool Disasm::Disasm_TWO_0xc5(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2 || DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2959,7 +3526,7 @@ bool Disasm::Disasm_TWO_0xc5(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_0xc6(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "vcmppd"); //TODO
@@ -2967,7 +3534,7 @@ bool Disasm::Disasm_TWO_0xc6(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repne_F2|| DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 		strcpy_s(DisasmResult->Opcode, "reserve opcode");
 		return true;
 	}
@@ -2982,8 +3549,8 @@ bool Disasm::Disasm_TWO_0xc6(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 
 bool Disasm::Disasm_TWO_grp9(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1); 
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1); 
 	bool IsValidCode=false;
 	if (((ModRmByte >> 5) & 3) == 3)
 	{
@@ -3069,7 +3636,7 @@ bool Disasm::Disasm_TWO_grp9(DISASM_RESULT * DisasmResult, DISASM_POINT * Disasm
 	}
 	if (IsValidCode == false)
 	{
-		DisasmPoint->CurrentAddr += 2;
+		DisasmPoint->CurMemAddr += 2;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3081,35 +3648,35 @@ bool Disasm::Disasm_TWO_0xc8_0xcf(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 {
 	if (DisasmResult->PrefixState & PREFIX_REX_R)
 	{
-		UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+		UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 		switch (code)
 		{
-		case 0xc8:strcpy_s(DisasmResult->FirstOperand, "r8"); break;
-		case 0xc9:strcpy_s(DisasmResult->FirstOperand, "r9"); break;
-		case 0xca:strcpy_s(DisasmResult->FirstOperand, "r10"); break;
-		case 0xcb:strcpy_s(DisasmResult->FirstOperand, "r11"); break;
-		case 0xcc:strcpy_s(DisasmResult->FirstOperand, "r12"); break;
-		case 0xcd:strcpy_s(DisasmResult->FirstOperand, "r13"); break;
-		case 0xce:strcpy_s(DisasmResult->FirstOperand, "r14"); break;
-		case 0xcf:strcpy_s(DisasmResult->FirstOperand, "r15"); break;
+		case 0xc8:strcpy_s(DisasmResult->Operand[0], "r8"); break;
+		case 0xc9:strcpy_s(DisasmResult->Operand[0], "r9"); break;
+		case 0xca:strcpy_s(DisasmResult->Operand[0], "r10"); break;
+		case 0xcb:strcpy_s(DisasmResult->Operand[0], "r11"); break;
+		case 0xcc:strcpy_s(DisasmResult->Operand[0], "r12"); break;
+		case 0xcd:strcpy_s(DisasmResult->Operand[0], "r13"); break;
+		case 0xce:strcpy_s(DisasmResult->Operand[0], "r14"); break;
+		case 0xcf:strcpy_s(DisasmResult->Operand[0], "r15"); break;
 		}
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 	}
 	else if (DisasmResult->PrefixState & PREFIX_REX_W)
 	{
-		UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+		UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 		switch (code)
 		{
-		case 0xc8:strcpy_s(DisasmResult->FirstOperand, "r8d"); break;
-		case 0xc9:strcpy_s(DisasmResult->FirstOperand, "r9d"); break;
-		case 0xca:strcpy_s(DisasmResult->FirstOperand, "r10d"); break;
-		case 0xcb:strcpy_s(DisasmResult->FirstOperand, "r11d"); break;
-		case 0xcc:strcpy_s(DisasmResult->FirstOperand, "r12d"); break;
-		case 0xcd:strcpy_s(DisasmResult->FirstOperand, "r13d"); break;
-		case 0xce:strcpy_s(DisasmResult->FirstOperand, "r14d"); break;
-		case 0xcf:strcpy_s(DisasmResult->FirstOperand, "r15d"); break;
+		case 0xc8:strcpy_s(DisasmResult->Operand[0], "r8d"); break;
+		case 0xc9:strcpy_s(DisasmResult->Operand[0], "r9d"); break;
+		case 0xca:strcpy_s(DisasmResult->Operand[0], "r10d"); break;
+		case 0xcb:strcpy_s(DisasmResult->Operand[0], "r11d"); break;
+		case 0xcc:strcpy_s(DisasmResult->Operand[0], "r12d"); break;
+		case 0xcd:strcpy_s(DisasmResult->Operand[0], "r13d"); break;
+		case 0xce:strcpy_s(DisasmResult->Operand[0], "r14d"); break;
+		case 0xcf:strcpy_s(DisasmResult->Operand[0], "r15d"); break;
 		}
-		DisasmPoint->CurrentAddr += 1;
+		DisasmPoint->CurMemAddr += 1;
 	}
 	else
 	{
@@ -3120,7 +3687,7 @@ bool Disasm::Disasm_TWO_0xc8_0xcf(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 
 bool Disasm::Disasm_THREE38_0x0x(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState & PREFIX_Oprand_Size_66)
 	{
 		switch (code)
@@ -3138,7 +3705,7 @@ bool Disasm::Disasm_THREE38_0x0x(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 		case 0x0a:strcpy_s(DisasmResult->Opcode, "vpsignd");break;
 		case 0x0b:strcpy_s(DisasmResult->Opcode, "vpmulhrsw");break;
 		default:
-			DisasmPoint->CurrentAddr += 3;
+			DisasmPoint->CurMemAddr += 3;
 			strcpy_s(DisasmResult->Opcode, "reserve code");
 			return true;
 		}
@@ -3161,7 +3728,7 @@ bool Disasm::Disasm_THREE38_0x0x(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 		case 0x0a:strcpy_s(DisasmResult->Opcode, "psignd"); break;
 		case 0x0b:strcpy_s(DisasmResult->Opcode, "pmulhrsw"); break;
 		default:
-			DisasmPoint->CurrentAddr += 3;
+			DisasmPoint->CurMemAddr += 3;
 			strcpy_s(DisasmResult->Opcode, "reserve code");
 			return true;
 		}
@@ -3174,7 +3741,7 @@ bool Disasm::Disasm_THREE38_gernel(DISASM_RESULT * DisasmResult, DISASM_POINT * 
 {
 	if (!(DisasmResult->PrefixState & PREFIX_Oprand_Size_66))
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3183,7 +3750,7 @@ bool Disasm::Disasm_THREE38_gernel(DISASM_RESULT * DisasmResult, DISASM_POINT * 
 
 bool Disasm::Disasm_THREE38_0x1c_0x1d_0x1e(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState & PREFIX_Oprand_Size_66)
 	{
 		switch (code)
@@ -3209,7 +3776,7 @@ bool Disasm::Disasm_THREE38_0x1c_0x1d_0x1e(DISASM_RESULT * DisasmResult, DISASM_
 
 bool Disasm::Disasm_THREE38_0xf0(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "movbe");//TODO
@@ -3225,7 +3792,7 @@ bool Disasm::Disasm_THREE38_0xf0(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3239,7 +3806,7 @@ bool Disasm::Disasm_THREE38_0xf0(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 
 bool Disasm::Disasm_THREE38_0xf1(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "movbe");//TODO
@@ -3255,7 +3822,7 @@ bool Disasm::Disasm_THREE38_0xf1(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3269,12 +3836,12 @@ bool Disasm::Disasm_THREE38_0xf1(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 
 bool Disasm::Disasm_THREE38_0xf2(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Repne_F2
 		|| DisasmResult->PrefixState&PREFIX_Repe_F3
 		|| DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3288,8 +3855,8 @@ bool Disasm::Disasm_THREE38_0xf2(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 
 bool Disasm::Disasm_THREE38_grp17(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
-	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurrentAddr + 1);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
+	UCHAR ModRmByte = *(UCHAR*)(DisasmPoint->CurMemAddr + 1);
 	bool IsValidCode = false;
 	switch (((ModRmByte >> 3) & 7))
 	{
@@ -3311,7 +3878,7 @@ bool Disasm::Disasm_THREE38_grp17(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 	}
 	if (IsValidCode == false)
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3320,10 +3887,10 @@ bool Disasm::Disasm_THREE38_grp17(DISASM_RESULT * DisasmResult, DISASM_POINT * D
 
 bool Disasm::Disasm_THREE38_0xf5(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3347,7 +3914,7 @@ bool Disasm::Disasm_THREE38_0xf5(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 
 bool Disasm::Disasm_THREE38_0xf6(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "adcx");
@@ -3359,13 +3926,13 @@ bool Disasm::Disasm_THREE38_0xf6(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 		ThreeByteCodeMap38[code].Operand = PACK_OPERAND(THREE_OPERAND, AT__B, OT__y, AT__G, OT__y, AT__E, OT__y, 0, 0);
 		//特殊处理 四个操作数
 		bool status=Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
-		strcpy_s(DisasmResult->ForthOperand,DisasmResult->ThirdOperand);
+		strcpy_s(DisasmResult->Operand[3],DisasmResult->Operand[2]);
 		if (DisasmPoint->PlatForm == PLATFORM_32BIT)
-			strcpy_s(DisasmResult->ThirdOperand, "edx");
+			strcpy_s(DisasmResult->Operand[2], "edx");
 		else if (DisasmPoint->PlatForm == PLATFORM_64BIT)
-			strcpy_s(DisasmResult->ThirdOperand, "rdx");
+			strcpy_s(DisasmResult->Operand[2], "rdx");
 		else if (DisasmPoint->PlatForm == PLATFORM_16BIT)
-			strcpy_s(DisasmResult->ThirdOperand, "dx");
+			strcpy_s(DisasmResult->Operand[2], "dx");
 		return status;
 	}
 	else if (DisasmResult->PrefixState&PREFIX_Repe_F3)
@@ -3375,7 +3942,7 @@ bool Disasm::Disasm_THREE38_0xf6(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 	}
 	else
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 	}
@@ -3384,7 +3951,7 @@ bool Disasm::Disasm_THREE38_0xf6(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 
 bool Disasm::Disasm_THREE38_0xf7(DISASM_RESULT * DisasmResult, DISASM_POINT * DisasmPoint, int * IsFinished)
 {
-	UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+	UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 	if (DisasmResult->PrefixState&PREFIX_Oprand_Size_66)
 	{
 		strcpy_s(DisasmResult->Opcode, "shlx");
@@ -3412,7 +3979,7 @@ bool Disasm::Disasm_THREE3A_gernel(DISASM_RESULT * DisasmResult, DISASM_POINT * 
 {
 	if (!(DisasmResult->PrefixState & PREFIX_Oprand_Size_66))
 	{
-		DisasmPoint->CurrentAddr += 3;
+		DisasmPoint->CurMemAddr += 3;
 		strcpy_s(DisasmResult->Opcode, "reserve code");
 		return true;
 
@@ -3430,12 +3997,12 @@ bool Disasm::Disasm_THREE3A_0x0f(DISASM_RESULT * DisasmResult, DISASM_POINT * Di
 	else if(!(DisasmResult->PrefixState &PREFIX_Repne_F2
 		|| DisasmResult->PrefixState &PREFIX_Repe_F3))
 	{
-		UCHAR code = *(UCHAR*)(DisasmPoint->CurrentAddr);
+		UCHAR code = *(UCHAR*)(DisasmPoint->CurMemAddr);
 		strcpy_s(DisasmResult->Opcode, "palignr");
 		ThreeByteCodeMap3A[code].Operand = PACK_OPERAND(THREE_OPERAND, AT__P, OT__q, AT__Q, OT__q, AT__I, OT__b,0,0); //修改操作数
 		return Disasm_ModRM(DisasmResult, DisasmPoint, IsFinished);
 	}
-	DisasmPoint->CurrentAddr += 3;
+	DisasmPoint->CurMemAddr += 3;
 	strcpy_s(DisasmResult->Opcode, "reserve code");
 	return true;
 }

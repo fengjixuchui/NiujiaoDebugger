@@ -4,9 +4,9 @@
 #include "stdafx.h"
 #include "asm.h"
 #include "asm_struct.h"
-#include "Disasm_three_3a.h"
 #include <string.h>
 #include <Shlwapi.h>
+#include "Disasm_three_3a.h"
 
 CStrTrie* CAsm::m_strTrie = nullptr;
 CAsm::CAsm()
@@ -17,25 +17,26 @@ CAsm::CAsm()
 		m_strTrie = new CStrTrie();
 		for (int i = 0; i < (sizeof(gAsmInstruct) / sizeof(SAsmInstruct)); i++)
 		{
-			m_strTrie->TrieAddStr(gAsmInstruct[i].m_Mnemonic, int(gAsmInstruct[i].m_Operand), 0);
+			m_strTrie->TrieAddStr(gAsmInstruct[i].m_Mnemonic, UINT64(gAsmInstruct[i].m_Operand), 0);
 		}
 	}
 }
 
-int CAsm::AsmFromStr(LPCTSTR asmStr, SAsmResultSet* asmResultSet)
+int CAsm::AsmFromStr(LPCTSTR asmStr,int platForm, SAsmResultSet* asmResultSet)
 {
 	if (asmResultSet == nullptr) return -1;
 	char AsmStr[1024] = { 0 };
 	//首先转成多字节  前缀树用的是多字节字符保存
 	WideCharToMultiByte(CP_ACP, 0, asmStr, lstrlen(asmStr), AsmStr, 1024,nullptr,nullptr);
+
 	if (strlen(AsmStr) == 0) return false;
 
-	//分解汇编字符串
+	//分解汇编字符串 前缀->助记符->操作数0...4
 	SAsmStr StructAsmStr = { 0 };
 	if (SplitStr(AsmStr, &StructAsmStr) == false) return false ;
 
 	//获取已定义的助记符信息
-	int Addr = 0;
+	UINT64 Addr = 0;
 	m_strTrie->GetDataInTrie(StructAsmStr.m_Instruct, &Addr, nullptr);
 
 	SInstructFmt *InstructFmt = reinterpret_cast<SInstructFmt*>(Addr);
@@ -45,9 +46,8 @@ int CAsm::AsmFromStr(LPCTSTR asmStr, SAsmResultSet* asmResultSet)
 		if ((InstructFmt + i)->AsmFunc !=0)
 		{
 			asmResultSet->m_TotalRecord += 1;
-			//TODO 检查指令是否支持当前平台
-
 			SAsmResult TmpResult = { 0 };
+			TmpResult.m_PlatForm = platForm;
 			if ((InstructFmt + i)->m_GroupPos == -1) //不属于分组指令
 			{
 				//检查操作数数量是否匹配
@@ -62,16 +62,10 @@ int CAsm::AsmFromStr(LPCTSTR asmStr, SAsmResultSet* asmResultSet)
 				//如果是0个操作数的就不需要继续处理了
 				if (StructAsmStr.m_OperandNum == 0)
 					ProcessResult = true;
-				else
-					if ((InstructFmt + i)->AsmFunc == nullptr)
-						ProcessResult = false;
-					else
-						ProcessResult = (InstructFmt + i)->AsmFunc(&StructAsmStr, &TmpResult, InstructFmt + i);
 			}
-			else
+			if(ProcessResult == false)
 			{
-				//分组指令都有独自的处理程序
-				ProcessResult = (InstructFmt + i)->AsmFunc(&StructAsmStr, &TmpResult, InstructFmt + i);
+				ProcessResult=(InstructFmt + i)->AsmFunc(&StructAsmStr, &TmpResult, InstructFmt + i);
 			}
 			//合并定义的操作码，前缀和处理结果
 			if (ProcessResult == false)
@@ -83,45 +77,59 @@ int CAsm::AsmFromStr(LPCTSTR asmStr, SAsmResultSet* asmResultSet)
 			{
 				//拷贝前缀
 				int pos = 0;
-			//	if((InstructFmt + i)->Prefix!=0)
+				if((UINT)(StructAsmStr.Prefix)>0)
 				{
-			//		(asmResultSet->m_AsmResult + i)->m_Result[pos] = (InstructFmt + i)->Prefix;
-			//		pos++;
-			//		(asmResultSet->m_AsmResult + i)->m_PrefixLength++;
+					// 添加 asmstr 里面的前缀
+					for (int j = 0; j < MAX_PREFIX_NUM; j++)
+					{
+						if (StructAsmStr.Prefix[j])
+							TmpResult.Prefix[j] = StructAsmStr.Prefix[j];
+						if (TmpResult.Prefix[j])
+						{
+							(asmResultSet->m_AsmResult + i)->m_Result[pos] = TmpResult.Prefix[j];
+							pos++;
+							(asmResultSet->m_AsmResult + i)->m_PrefixLength++;
+							(asmResultSet->m_AsmResult + i)->m_TotalLength++;
+						}
+					}
 				}
 				//拷贝操作码
 				if((InstructFmt + i)->m_Opcode<=0xFF)
 				{
-					(asmResultSet->m_AsmResult + i)->m_Result[0] = (InstructFmt + i)->m_Opcode;
+					(asmResultSet->m_AsmResult + i)->m_Result[pos] = (InstructFmt + i)->m_Opcode;
 					(asmResultSet->m_AsmResult + i)->m_OpcodeLength++;
 					pos++;
+					(asmResultSet->m_AsmResult + i)->m_TotalLength++;
 				}
 				else 
 				{
 					char* TmpOpcode = (char*)&((InstructFmt + i)->m_Opcode);
 					if ((InstructFmt + i)->m_Opcode <= 0xFFFF)
 					{
-						(asmResultSet->m_AsmResult + i)->m_Result[0] = TmpOpcode[1];
-						(asmResultSet->m_AsmResult + i)->m_Result[1] = TmpOpcode[0];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos] = TmpOpcode[1];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+1] = TmpOpcode[0];
 						(asmResultSet->m_AsmResult + i)->m_OpcodeLength += 2;
 						pos += 2;
+						(asmResultSet->m_AsmResult + i)->m_TotalLength+=2;
 					}
 					else if ((InstructFmt + i)->m_Opcode <= 0xFFFFFF)
 					{
-						(asmResultSet->m_AsmResult + i)->m_Result[0] = TmpOpcode[2];
-						(asmResultSet->m_AsmResult + i)->m_Result[1] = TmpOpcode[1];
-						(asmResultSet->m_AsmResult + i)->m_Result[2] = TmpOpcode[0];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+0] = TmpOpcode[2];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+1] = TmpOpcode[1];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+2] = TmpOpcode[0];
 						(asmResultSet->m_AsmResult + i)->m_OpcodeLength += 3;
 						pos += 3;
+						(asmResultSet->m_AsmResult + i)->m_TotalLength += 3;
 					}
 					else if ((InstructFmt + i)->m_Opcode <= 0xFFFFFFFF)
 					{
-						(asmResultSet->m_AsmResult + i)->m_Result[0] = TmpOpcode[3];
-						(asmResultSet->m_AsmResult + i)->m_Result[1] = TmpOpcode[2];
-						(asmResultSet->m_AsmResult + i)->m_Result[2] = TmpOpcode[1];
-						(asmResultSet->m_AsmResult + i)->m_Result[3] = TmpOpcode[0];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+0] = TmpOpcode[3];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+1] = TmpOpcode[2];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+2] = TmpOpcode[1];
+						(asmResultSet->m_AsmResult + i)->m_Result[pos+3] = TmpOpcode[0];
 						(asmResultSet->m_AsmResult + i)->m_OpcodeLength += 4;
 						pos += 4;
+						(asmResultSet->m_AsmResult + i)->m_TotalLength += 4;
 					}
 				}
 				//拷贝操作数
@@ -129,10 +137,11 @@ int CAsm::AsmFromStr(LPCTSTR asmStr, SAsmResultSet* asmResultSet)
 				{
 					(asmResultSet->m_AsmResult + i)->m_Result[pos] = TmpResult.m_Result[kkk];
 					pos++;
-					(asmResultSet->m_AsmResult + i)->m_OperandLength++;
 				}
 
-				(asmResultSet->m_AsmResult + i)->m_TotalLength = (asmResultSet->m_AsmResult + i)->m_OpcodeLength + (asmResultSet->m_AsmResult + i)->m_OperandLength;
+				(asmResultSet->m_AsmResult + i)->m_TotalLength = (asmResultSet->m_AsmResult + i)->m_PrefixLength + 
+																(asmResultSet->m_AsmResult + i)->m_OpcodeLength +
+																(asmResultSet->m_AsmResult + i)->m_OperandLength;
 				asmResultSet->m_SuccessRecord += 1;
 			}
 		}
@@ -212,7 +221,23 @@ bool CAsm::SplitStr(char* str, SAsmStr* StructAsmStr)
 		if(Flag)
 		{
 			StructAsmStr->m_OperandNum++;
-			if (*(StructAsmStr->m_Instruct) == 0x00) strcpy(StructAsmStr->m_Instruct,TmpStr + i);
+			if (*(StructAsmStr->m_Instruct) == 0x00)
+			{
+				if (strncmp(StructAsmStr->m_Instruct, "lock", 4) == 0)
+					StructAsmStr->Prefix[1] = ASM_PREFIX_Lock_F0;
+				else if (strncmp(StructAsmStr->m_Instruct, "repe", 4) == 0)
+				{
+					if (StructAsmStr->Prefix[2]) return false; //互斥
+					else  StructAsmStr->Prefix[2] = ASM_PREFIX_Repe_F3;
+				}
+				else if (strncmp(StructAsmStr->m_Instruct, "repne", 5) == 0)
+				{
+					if (StructAsmStr->Prefix[2]) return false; //互斥
+					else  StructAsmStr->Prefix[2] = ASM_PREFIX_Repne_F2;
+				}
+				else
+					strcpy(StructAsmStr->m_Instruct, TmpStr + i);
+			}
 			else if (*(StructAsmStr->m_First) == 0x00) strcpy(StructAsmStr->m_First,TmpStr + i);
 			else if (*(StructAsmStr->m_Second) == 0x00) strcpy(StructAsmStr->m_Second, TmpStr + i);
 			else if (*(StructAsmStr->m_Third) == 0x00) strcpy(StructAsmStr->m_Third,TmpStr + i);
@@ -229,7 +254,7 @@ bool CAsm::SplitStr(char* str, SAsmStr* StructAsmStr)
 	return true;
 }
 
-bool CAsm::IsImmValue(char * tmpStr, int * immValue)
+bool CAsm::GetImmValue(char * tmpStr, int * immValue)
 {
 	char ImmStr[16] = { 0 };
 	int len = strlen(tmpStr);
@@ -256,34 +281,112 @@ bool CAsm::IsImmValue(char * tmpStr, int * immValue)
 	return true;
 }
 
-bool CAsm::IsReg(char * tmpStr, int base, int * Reg)
+bool CAsm::GetReg(char * tmpStr, int * Reg)
 {
 	if (tmpStr == nullptr)
 		return false;
-	for (int i = 16 * base; i < 16; i++)
+	for (int base = 0; base < 4; base++)
 	{
-		if (strcmp(gRegister[i], tmpStr) == 0)
+		for (int i = 0; i < RG__MAX; i++)
 		{
-			if (Reg) *Reg = i;
-			return true;
+			if (strcmp(gRegister[RG__MAX * base+i], tmpStr) == 0)
+			{
+				if (Reg) *Reg = RG__MAX * base+i;
+				return true;
+			}
 		}
 	}
 	return false;
 }
 
-bool CAsm::IsMemAddressing(char * tmpStr)
+bool CAsm::GetMemAddressInfo(char * tmpStr,S_MEM_ADDRESS* MemAddr)
 {
-	int pos1 = 0;
-	int pos2 = 0;
+	int StartFlag = 0;
+	int EndFlag = 0;
+	int CurPos=0;
 	int len = strlen(tmpStr);
 	for (int i = 0; i < len; i++)
 	{
-		if (*(tmpStr + i) == '[') pos1 = i;
-		else if (*(tmpStr + i) == ']') pos2 = i;
+		if (*(tmpStr + i) == '[') StartFlag = i;
+		else if (*(tmpStr + i) == ']') EndFlag = i;
 	}
-	if (pos2 > pos1) 
+	if (EndFlag <= StartFlag)
+		return false;
+	//确定操作数宽度
+	if (strncmp(tmpStr, "byte", 4) == 0)
+		MemAddr->m_OperSize = 0;
+	else if (strncmp(tmpStr, "word", 4) == 0)
+		MemAddr->m_OperSize = 1;
+	else if (strncmp(tmpStr, "dword", 5) == 0)
+		MemAddr->m_OperSize = 2;
+	else if (strncmp(tmpStr, "qword", 5) == 0)
+		MemAddr->m_OperSize = 3;
+	//确定段寄存器
+	if (StartFlag > 2)
+	{
+		if (*(tmpStr + StartFlag - 1) == ':'&&*(tmpStr + StartFlag - 2) == 's') //存在段寄存器描述的情况
+		{
+			switch (*(tmpStr + StartFlag - 3))
+			{
+			case 'e':MemAddr->m_SegReg = ASM_PREFIX_Seg_ES_26; break;
+			case 'c':MemAddr->m_SegReg = ASM_PREFIX_Seg_CS_2E; break;
+			case 's':MemAddr->m_SegReg = ASM_PREFIX_Seg_SS_36; break;
+			case 'd':MemAddr->m_SegReg = ASM_PREFIX_Seg_DS_3E; break;
+			case 'f':MemAddr->m_SegReg = ASM_PREFIX_Seg_FS_64; break;
+			case 'g':MemAddr->m_SegReg = ASM_PREFIX_Seg_GS_65; break;
+			default:
+				return false;
+			}
+		}
+		else
+		{
+			//默认为 ds
+			MemAddr->m_SegReg = ASM_PREFIX_Seg_DS_3E;
+		}
+	}
+	//确定地址类型
+	char tmpAddrStr[16] = { 0 };
+	StartFlag++; //跳过 '[' 符号
+	strncpy(tmpAddrStr, (tmpStr + StartFlag ), EndFlag - StartFlag);
+	StripStr(tmpAddrStr); //清理多余的空格
+
+	//检查是否有 + 号
+	int PlusFlag = false;
+	for (int i = 0; *(tmpAddrStr + i); i++)
+	{
+		if (*(tmpAddrStr + i) == '+' || *(tmpAddrStr + i) == '-' || *(tmpAddrStr + i) == '*')
+		{
+			PlusFlag = true;
+			break;
+		}
+	}
+	if (PlusFlag)
+	{
+		MemAddr->m_Type = 2;
+		strcpy((char*)MemAddr->m_Addrtype.s_ModRm.m_ModRmStr, tmpAddrStr);
 		return true;
-	return false;
+	}
+	else
+	{
+		//判断当前部分是否为立即数
+		int TmpValue = 0;
+		if (GetImmValue(tmpAddrStr, &TmpValue) == true)
+		{
+			MemAddr->m_Type = 0;
+			MemAddr->m_Addrtype.s_Imm.m_ImmValue = (UINT64)TmpValue;
+			strcpy((char*)MemAddr->m_Addrtype.s_Imm.m_ImmStr, tmpAddrStr);
+		}
+		else if(GetReg(tmpAddrStr, &TmpValue))
+		{
+			MemAddr->m_Type = 1;
+			MemAddr->m_Addrtype.s_Reg.m_RegNum = TmpValue;
+			strcpy((char*)MemAddr->m_Addrtype.s_Reg.m_RegStr,tmpAddrStr);
+		}
+		else
+			return false;
+	}
+	//检查后续是否有偏移
+	return true;
 }
 
 UINT64 CAsm::GetOpcode(UINT Opcode)
@@ -700,7 +803,7 @@ bool CAsm::Asm_Imm(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt* forma
 {
 	//只处理只有一个操作数并且为立即数的情况
 	int ImmOperand = 0;	
-	if (IsImmValue(asmStr->m_First, &ImmOperand) == false)
+	if (GetImmValue(asmStr->m_First, &ImmOperand) == false)
 		return false;
 	//检查操作数大小是否相符
 	switch(GET_OPERAND_TYPE(format->Operand,0))
@@ -729,7 +832,7 @@ bool CAsm::Asm_Imm(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt* forma
 		return true;
 	case OT__q:break;
 	}
-	return false;;
+	return true;
 }
 
 bool CAsm::Asm_Grp_80_81_82_83(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt* format)
@@ -1083,4 +1186,34 @@ bool CAsm::Asm_Grp_0FC7(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt* 
 {
 	return false;
 }
+
+bool CAsm::Asm_ac(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * format)
+{
+	S_MEM_ADDRESS MemAddress = { 0 };
+	//获取内存寻址信息
+	if (GetMemAddressInfo(asmStr->m_First, &MemAddress) == false)
+		return false;
+	//检查目的地址是不是 (e)si 寄存器
+	if(MemAddress.m_Type!=1||(MemAddress.m_Addrtype.s_Reg.m_RegNum&RG__SI==0)) 
+		return false;
+	if ((MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4) != asmResult->m_PlatForm) //32 si  64 esi
+	{
+		if ((asmResult->m_PlatForm == PLATFORM_32BIT && (MemAddress.m_Addrtype.s_Reg.m_RegNum>>4 == 1))
+			|| (asmResult->m_PlatForm == PLATFORM_64BIT && (MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4 == 2)))
+			asmResult->Prefix[3] = ASM_PREFIX_Address_Size_67;
+	}
+	if (MemAddress.m_OperSize == 0) // byte ptr
+	{
+		return true;
+	}
+	else if (MemAddress.m_OperSize == 1) // word ptr
+	{
+		asmResult->Prefix[0] = ASM_PREFIX_REX_W;
+		return true;
+	}
+	else
+		return false;
+}
+
+
 

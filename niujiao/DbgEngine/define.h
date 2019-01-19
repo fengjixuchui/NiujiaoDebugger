@@ -64,18 +64,15 @@ enum {
 	ASM_PREFIX_Repe_F3 = 0xF3,  
 };   //前缀类型枚举
 
-#define ZERO_OPERAND 0
-#define ONE_OPERAND 1
-#define TWO_OPERAND  2
-#define THREE_OPERAND 3
-#define FOUR_OPERAND 4
+
+enum {ZERO_OPERAND, ONE_OPERAND, TWO_OPERAND, THREE_OPERAND, FOUR_OPERAND};
 
 //操作数内容打包成一个整数 a占前三位 其余占5位
-#define PACK_OPERAND(OperandNum,FirstAddressType,FirstOperandType,d,e,f,g,h,i) (OperandNum+(FirstAddressType<<2)+(FirstOperandType<<7)+(d<<12)+(e<<17)+(f<<22)+(g<<27)+(h<<27)+(i<<27))
+#define PACK_OPERAND(a,b,c,d,e,f,g,h,i) ((UINT64)a+((UINT64)b<<3)+((UINT64)c<<8)+((UINT64)d<<13)+((UINT64)e<<18)+((UINT64)f<<23)+((UINT64)g<<28)+((UINT64)h<<33)+((UINT64)i<<38))
 //获取操作数数量
 #define GET_OPERAND_NUM(x)  (x&3)
-#define GET_ADDRES_TYPE(x,i) ((x>>(2+10*i))&31)
-#define GET_OPERAND_TYPE(x,i) ((x>>(7+10*i))&31)
+#define GET_ADDRES_TYPE(x,i) ((x>>(3+10*i))&0x1F)
+#define GET_OPERAND_TYPE(x,i) ((x>>(8+10*i))&0x1F)
 
 
 //寻址模式  intel手册 2512
@@ -105,6 +102,7 @@ enum ERegisterType
 	RG__AX, RG__CX, RG__DX, RG__BX, RG__SP, RG__BP, RG__SI, RG__DI, RG__ES, RG__SS, RG__CS, RG__DS, RG__GS, RG__FS,RG__MAX = 16
 };
 
+#define MAX_PREFIX_NUM 5
 typedef struct s_asm_str
 {
 	char m_Instruct[16];
@@ -113,14 +111,17 @@ typedef struct s_asm_str
 	char m_Third[64];
 	char m_Forth[64];
 	USHORT m_OperandNum;
+	UCHAR Prefix[MAX_PREFIX_NUM];  //0: REX前缀 1: lock 2:repe repne 3 operandsize 4 addrsize
 }SAsmStr;
 
 typedef struct s_asm_result
 {
 	UCHAR m_Result[14];
+	UCHAR Prefix[MAX_PREFIX_NUM];  //0: REX前缀 1: lock 2:repe repne 3 operandsize 4 addrsize
 	UINT m_PrefixLength : 8;
 	UINT m_OpcodeLength : 8;
 	UINT m_OperandLength : 8;
+	UINT m_PlatForm : 8;
 	INT m_TotalLength : 8;//没有结果为0 其余大于0的情况为指令长度 -1为指令出错
 	int m_ErrorCode;  //每条的匹配结果
 }SAsmResult;
@@ -140,9 +141,7 @@ typedef struct s_instruct_fmt
 	DWORD64 Operand;
 	USHORT m_Support64Bit;
 	USHORT m_Support32Bit;
-	USHORT m_SupportedCompatLegMod;
 	SHORT m_GroupPos;
-	//UINT Prefix;
 	bool(*AsmFunc)(SAsmStr* asmStr, SAsmResult* asmResult, struct s_instruct_fmt* format); //汇编函数
 }SInstructFmt;
 typedef  struct s_asm_instruct
@@ -154,3 +153,34 @@ enum
 {
 	e_Eax, e_Ecx, e_Edx, e_Ebx, e_Ebp = 5, e_Esi, e_Edi
 };
+
+//反汇编结果结构体
+enum {
+	PLATFORM_8BIT,
+	PLATFORM_16BIT,
+	PLATFORM_32BIT,
+	PLATFORM_64BIT
+};
+typedef struct disasm_result
+{
+	LPVOID CodeMap;
+	UINT64 CurFileOffset;
+	BYTE  MachineCode[16];
+	bool IsData; //可能是数据
+	UINT SIB_Prefix;
+	DWORD PrefixState;
+	char Opcode[15];
+	UINT CurrentLen;
+	UINT OperandNum;
+	char PreStr[8];
+	char Operand[4][64];
+	char  Memo[32];
+
+}DISASM_RESULT;
+
+typedef struct disasm_addr_queue
+{
+	LPVOID Addr;
+	struct disasm_addr_queue* next;
+} DISASM_ADDR_QUEUE;
+

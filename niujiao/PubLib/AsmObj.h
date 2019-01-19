@@ -10,10 +10,12 @@ typedef struct {
 		/* Type-specific fields go here. */
 	PyObject* AsmStr;   //原始字符串 
 	PyObject* Result;   //汇编结果
+	PyObject* TimeElapse;
 } AsmObject;
 PyObject * AsmObject_new(PyTypeObject * type, PyObject * args, PyObject * kwds);
 
 PyObject * AsmObject_subscript(AsmObject *mp, PyObject *key);
+ void AsmObject_dealloc(PyObject * ptr);
 static PyMappingMethods AsmObject_as_mapping = {
 	NULL, /*mp_length*/
 	(binaryfunc)AsmObject_subscript, /*mp_subscript*/
@@ -23,6 +25,7 @@ static PyMappingMethods AsmObject_as_mapping = {
 static PyMemberDef AsmObject_members[] = {
 	{"AsmStr", T_OBJECT_EX, offsetof(AsmObject, AsmStr), 0,"original asm string"},
 	{"Result", T_OBJECT_EX, offsetof(AsmObject, Result), 0,"assembly result"},
+	{"TimeElapse", T_OBJECT_EX, offsetof(AsmObject, TimeElapse), 0,"elapse time:tick count"},
 	{NULL}  /* Sentinel */
 };
 
@@ -31,7 +34,7 @@ static PyTypeObject AsmObjectType = {
 	"AsmObject",
 	sizeof(AsmObject),
 	0,
-	0,                                  /* tp_dealloc */
+	AsmObject_dealloc,                                  /* tp_dealloc */
 	0,                                  /* tp_print */
 	0,                                  /* tp_getattr */
 	0,                                  /* tp_setattr */
