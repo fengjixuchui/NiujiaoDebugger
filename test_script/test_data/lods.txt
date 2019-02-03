@@ -1,3 +1,4 @@
+;ac分支
 AC|lods byte ptr ds:[esi]|2
 66AC|lods byte ptr ds:[esi]|2
 67AC|lods byte ptr ds:[si]|2
@@ -10,3 +11,17 @@ AC|lods byte ptr ds:[rsi]|3
 4866AC|lods byte ptr ds:[rsi]|3
 4867AC|lods byte ptr ds:[esi]|3
 486667AC|lods byte ptr ds:[esi]|3
+
+;ad分支
+AD|lods dword ptr ds:[esi]|2
+66AD|lods word ptr ds:[esi]|2
+67AD|lods dword ptr ds:[si]|2
+6667AD|lods word ptr ds:[si]|2
+AD|lods dword ptr ds:[rsi]|3
+66AD|lods word ptr ds:[rsi]|3
+67AD|lods dword ptr ds:[esi]|3
+6667AD|lods word ptr ds:[esi]|3
+48AD|lods qword ptr ds:[rsi]|3
+4866AD|lods dword ptr ds:[rsi]|3
+4867AD|lods dword ptr ds:[esi]|3
+486667AD|lods word ptr ds:[esi]|3

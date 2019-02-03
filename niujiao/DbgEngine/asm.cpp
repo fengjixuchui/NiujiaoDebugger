@@ -3,7 +3,7 @@
 */
 #include "stdafx.h"
 #include "asm.h"
-#include "asm_struct.h"
+#include "asm_general_struct.h"
 #include <string.h>
 #include <Shlwapi.h>
 #include "Disasm_three_3a.h"
@@ -15,9 +15,9 @@ CAsm::CAsm()
 	if (m_strTrie == nullptr)
 	{
 		m_strTrie = new CStrTrie();
-		for (int i = 0; i < (sizeof(gAsmInstruct) / sizeof(SAsmInstruct)); i++)
+		for (int i = 0; i < (sizeof(gAsmGeneralInstruct) / sizeof(SAsmInstruct)); i++)
 		{
-			m_strTrie->TrieAddStr(gAsmInstruct[i].m_Mnemonic, UINT64(gAsmInstruct[i].m_Operand), 0);
+			m_strTrie->TrieAddStr(gAsmGeneralInstruct[i].m_Mnemonic, UINT64(gAsmGeneralInstruct[i].m_Operand), 0);
 		}
 	}
 }
@@ -133,15 +133,13 @@ int CAsm::AsmFromStr(LPCTSTR asmStr,int platForm, SAsmResultSet* asmResultSet)
 					}
 				}
 				//拷贝操作数
-				for(int kkk=0; kkk<TmpResult.m_TotalLength;kkk++)
+				for(int kkk=0; kkk<TmpResult.m_OperandLength;kkk++)
 				{
 					(asmResultSet->m_AsmResult + i)->m_Result[pos] = TmpResult.m_Result[kkk];
 					pos++;
 				}
 
-				(asmResultSet->m_AsmResult + i)->m_TotalLength = (asmResultSet->m_AsmResult + i)->m_PrefixLength + 
-																(asmResultSet->m_AsmResult + i)->m_OpcodeLength +
-																(asmResultSet->m_AsmResult + i)->m_OperandLength;
+				(asmResultSet->m_AsmResult + i)->m_TotalLength = pos;
 				asmResultSet->m_SuccessRecord += 1;
 			}
 		}
@@ -835,6 +833,173 @@ bool CAsm::Asm_Imm(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt* forma
 	return true;
 }
 
+bool CAsm::Asm_al_ib(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * format)
+{
+	int reg = 0;
+	int imm = 0;
+	//确保是这两种操作数的组合
+	if (!((GET_ADDRES_TYPE(format->Operand, 0) == AT__REG8 && GET_ADDRES_TYPE(format->Operand, 1) == AT__I)
+		|| (GET_ADDRES_TYPE(format->Operand, 0) == AT__I || GET_ADDRES_TYPE(format->Operand, 1) == AT__REG8)))
+		return false;
+
+	//获取寄存器内容
+	if (GetReg(asmStr->m_First, &reg) == false || GetImmValue(asmStr->m_Second, &imm) == false)
+		return false;
+
+	for (int i = 0; i < 2; i++)
+	{
+		switch (GET_ADDRES_TYPE(format->Operand, i))
+		{
+		case AT__REG8:
+			//检查第一个操作数是不是指定寄存器
+			if (GET_ADDRES_TYPE(format->Operand, 0) != AT__REG8 || GET_OPERAND_TYPE(format->Operand, 0) != reg)
+				return false;
+			break;
+		case AT__I:
+			//检查第二个操作数的宽度
+			if (UINT(imm) > 0xFF) return false;
+			break;
+		}
+	}
+	//不受前缀影响
+	asmResult->m_Result[0] = imm;
+	asmResult->m_OperandLength = 1;
+	return true;
+}
+
+bool CAsm::Asm_axx_dx(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * format)
+{
+	int reg[2] = { 0 };
+	//确保是这几种操作数的组合
+	if (!((GET_ADDRES_TYPE(format->Operand, 0) == AT__REG8 && GET_ADDRES_TYPE(format->Operand, 1) == AT_XX)
+		|| (GET_ADDRES_TYPE(format->Operand, 0) == AT_XX && GET_ADDRES_TYPE(format->Operand, 1) == AT__REG8)
+		||(GET_ADDRES_TYPE(format->Operand, 0) == AT_XX && GET_ADDRES_TYPE(format->Operand, 1) == AT_XX)
+		||( GET_ADDRES_TYPE(format->Operand, 0) == AT_eXX && GET_ADDRES_TYPE(format->Operand, 1) == AT_XX)
+		|| (GET_ADDRES_TYPE(format->Operand, 0) == AT_XX && GET_ADDRES_TYPE(format->Operand, 1) == AT_eXX)))
+		return false;
+
+	//获取寄存器内容
+	if (GetReg(asmStr->m_First, &reg[0]) == false || GetReg(asmStr->m_Second, &reg[1]) == false)
+		return false;
+
+	for (int i = 0; i < 2; i++)
+	{
+		switch (GET_ADDRES_TYPE(format->Operand, i))
+		{
+		case AT__REG8:
+			if (GET_OPERAND_TYPE(format->Operand, i) != reg[i])
+				return false;
+			break;
+		case AT_XX: //DX AX
+			//检查是否指定寄存器
+			if (GET_OPERAND_TYPE(format->Operand, i) == RG__DX)
+			{
+				if(reg[i]!=(RG__DX + RG__MAX * 1))
+					return false;
+			}
+			else if (GET_OPERAND_TYPE(format->Operand, i) == RG__AX)
+			{
+				if (reg[i] != (RG__AX + RG__MAX * 1))
+					return false;
+				if (asmResult->m_PlatForm == PLATFORM_16BIT)
+				{
+				}
+				else if (asmResult->m_PlatForm == PLATFORM_32BIT || asmResult->m_PlatForm == PLATFORM_64BIT)
+					asmResult->Prefix[3] = 0x66;
+				else
+					return false;
+			}
+			else
+				return false;
+			break;
+		case AT_eXX: //eax
+			if (GET_OPERAND_TYPE(format->Operand, i) == RG__AX)
+			{
+				if (reg[i] != (RG__AX + +RG__MAX * 2))
+					return false;
+
+				if (asmResult->m_PlatForm == PLATFORM_16BIT)
+					asmResult->Prefix[3] = 0x66;
+				else if (asmResult->m_PlatForm == PLATFORM_32BIT || asmResult->m_PlatForm == PLATFORM_64BIT)
+				{ }
+				else
+					return false;
+			}
+			break;
+		default:
+			return false;
+		}
+	}	
+	return true;
+}
+
+bool CAsm::Asm_eax_id(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * format)
+{
+	int Reg = 0;
+	int Imm = 0;
+	//获取寄存器内容
+	if (GetReg(asmStr->m_First, &Reg) == false || GetImmValue(asmStr->m_Second, &Imm) == false)
+		return false;
+	if (Reg&RG__AX == 0)  //检查第一个参数是否eax 或者 ax 或者 rax
+		return false;
+	if (Reg & 16) // AX
+	{
+		if ((UINT)Imm > 0xFFFF)
+			return false;
+		if (asmResult->m_PlatForm == PLATFORM_16BIT)
+		{}
+		else if (asmResult->m_PlatForm == PLATFORM_32BIT)
+			asmResult->Prefix[3] = 0x66;
+		else if (asmResult->m_PlatForm == PLATFORM_64BIT)
+		{
+			asmResult->Prefix[0] = 0x48;
+			asmResult->Prefix[3] = 0x66;
+		}
+		else
+			return false;
+		asmResult->m_Result[1] = Imm & 0xFF;
+		asmResult->m_Result[0] = (Imm >> 8) & 0xFF;
+		asmResult->m_OperandLength = 2;
+		return true;
+
+	}
+	else if (Reg & 32) // EAX
+	{
+		if ((UINT)Imm > 0xFFFFFFFF)
+			return false;
+		if (asmResult->m_PlatForm == PLATFORM_32BIT || asmResult->m_PlatForm == PLATFORM_64BIT)
+		{}
+		else if (asmResult->m_PlatForm == PLATFORM_16BIT)
+			asmResult->Prefix[3] = 0x66;
+		else 
+			return false;
+		asmResult->m_Result[3] = Imm & 0xFF;
+		asmResult->m_Result[2] = (Imm >> 8) & 0xFF;
+		asmResult->m_Result[1] = (Imm >> 16) & 0xFF;
+		asmResult->m_Result[0] = (Imm >> 24) & 0xFF;
+		asmResult->m_OperandLength = 4;
+		return true;
+	}
+	else if (Reg & 48)// RAX
+	{
+		if (asmResult->m_PlatForm != PLATFORM_64BIT)
+			return false;
+		if ((UINT)Imm > 0xFFFFFFFF)
+			return false;
+		asmResult->Prefix[0] = 0x48;
+		
+		asmResult->m_Result[3] = Imm & 0xFF;
+		asmResult->m_Result[2] = (Imm>>8) & 0xFF;
+		asmResult->m_Result[1] = (Imm>>16) & 0xFF;
+		asmResult->m_Result[0] = (Imm>>24) & 0xFF;
+		asmResult->m_OperandLength = 4;
+		return true;
+	}
+	else
+		return false;
+}
+
+
 bool CAsm::Asm_Grp_80_81_82_83(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt* format)
 {
 	char Mnemonic[][4] = { "add","or","adc","sbb","and","sub","xor","cmp" };
@@ -1194,26 +1359,89 @@ bool CAsm::Asm_ac(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * forma
 	if (GetMemAddressInfo(asmStr->m_First, &MemAddress) == false)
 		return false;
 	//检查目的地址是不是 (e)si 寄存器
-	if(MemAddress.m_Type!=1||(MemAddress.m_Addrtype.s_Reg.m_RegNum&RG__SI==0)) 
+	if(MemAddress.m_Type!=1||(MemAddress.m_Addrtype.s_Reg.m_RegNum&RG__SI)==0) 
 		return false;
 	if ((MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4) != asmResult->m_PlatForm) //32 si  64 esi
 	{
 		if ((asmResult->m_PlatForm == PLATFORM_32BIT && (MemAddress.m_Addrtype.s_Reg.m_RegNum>>4 == 1))
 			|| (asmResult->m_PlatForm == PLATFORM_64BIT && (MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4 == 2)))
-			asmResult->Prefix[3] = ASM_PREFIX_Address_Size_67;
+			asmResult->Prefix[4] = ASM_PREFIX_Address_Size_67;
 	}
 	if (MemAddress.m_OperSize == 0) // byte ptr
 	{
-		return true;
-	}
-	else if (MemAddress.m_OperSize == 1) // word ptr
-	{
-		asmResult->Prefix[0] = ASM_PREFIX_REX_W;
 		return true;
 	}
 	else
 		return false;
 }
 
+bool CAsm::Asm_ad(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * format)
+{
+	S_MEM_ADDRESS MemAddress = { 0 };
+	//获取内存寻址信息
+	if (GetMemAddressInfo(asmStr->m_First, &MemAddress) == false)
+		return false;
+	//检查目的地址是不是 (e)si 寄存器
+	if (MemAddress.m_Type != 1 || (MemAddress.m_Addrtype.s_Reg.m_RegNum&RG__SI) == 0)
+		return false;
 
+	// TODO  把下面的分支抽象起来
+	if (asmResult->m_PlatForm == PLATFORM_32BIT)
+	{
+		if (MemAddress.m_OperSize == PLATFORM_16BIT)
+			asmResult->Prefix[3] = ASM_PREFIX_Oprand_Size_66;
+		else if (MemAddress.m_OperSize != PLATFORM_32BIT)
+			return false;
+
+		if((MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4)== PLATFORM_16BIT)
+			asmResult->Prefix[4] = ASM_PREFIX_Address_Size_67;
+		else if ((MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4) != PLATFORM_32BIT) 
+			return false;
+	}
+	else if (asmResult->m_PlatForm == PLATFORM_64BIT) 
+	{
+		if (MemAddress.m_OperSize== PLATFORM_16BIT)
+			asmResult->Prefix[3] = ASM_PREFIX_Oprand_Size_66;
+		else if (MemAddress.m_OperSize == PLATFORM_64BIT)
+			asmResult->Prefix[0] = ASM_PREFIX_REX_W;
+		else if (MemAddress.m_OperSize != PLATFORM_32BIT)
+			return false;
+
+		if ((MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4) == PLATFORM_32BIT)
+			asmResult->Prefix[4] = ASM_PREFIX_Address_Size_67;
+		else if ((MemAddress.m_Addrtype.s_Reg.m_RegNum >> 4) != PLATFORM_64BIT)
+			return false;
+	}
+	else
+		return false;
+	return true;
+}
+
+bool CAsm::Asm_a4(SAsmStr * asmStr, SAsmResult * asmResult, SInstructFmt * format)
+{
+	S_MEM_ADDRESS FirstMemAddress = { 0 };
+	S_MEM_ADDRESS SecondMemAddress = { 0 };
+	//获取内存寻址信息
+	if (GetMemAddressInfo(asmStr->m_First, &FirstMemAddress) == false
+		|| GetMemAddressInfo(asmStr->m_Second, &SecondMemAddress) == false)
+		return false;
+	//检查目的地址是不是 (e)si 寄存器
+	if (FirstMemAddress.m_Type != 1 || (FirstMemAddress.m_Addrtype.s_Reg.m_RegNum&RG__SI) == 0
+		|| SecondMemAddress.m_Type != 1 || (SecondMemAddress.m_Addrtype.s_Reg.m_RegNum&RG__DI) == 0)
+		return false;
+
+	if ((FirstMemAddress.m_Addrtype.s_Reg.m_RegNum >> 4) != asmResult->m_PlatForm) //32 si  64 esi
+	{
+		if ((asmResult->m_PlatForm == PLATFORM_32BIT && (FirstMemAddress.m_Addrtype.s_Reg.m_RegNum >> 4 == 1))
+			|| (asmResult->m_PlatForm == PLATFORM_64BIT && (FirstMemAddress.m_Addrtype.s_Reg.m_RegNum >> 4 == 2)))
+			asmResult->Prefix[4] = ASM_PREFIX_Address_Size_67;
+	}
+	if (FirstMemAddress.m_OperSize == 0) // byte ptr
+	{
+		return true;
+	}
+	else
+		return false;
+
+}
 

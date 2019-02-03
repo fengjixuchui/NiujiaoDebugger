@@ -185,7 +185,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="DbgEngine\asm.h" />
-    <ClInclude Include="DbgEngine\asm_struct.h" />
+    <ClInclude Include="DbgEngine\asm_general_struct.h" />
     <ClInclude Include="DbgEngine\define.h" />
     <ClInclude Include="DbgEngine\Disasm.h" />
     <ClInclude Include="DbgEngine\Disasm_one.h" />

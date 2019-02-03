@@ -81,6 +81,10 @@ public:
 	static int Asm_SIB(char* AsmStr, char** SIBByte); //解析 SIB 字节
 	static int Asm_ModRm(char* AsmStr,char** ModeRmByte,int base); //解析ModRM字节 返回解析后的长度
 	static bool Asm_Imm(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);  //汇编操作数为立即数的汇编语句  ****
+	static bool Asm_al_ib(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);  //汇编操作数为8位寄存器和8位立即数  ****
+	static bool Asm_axx_dx(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);  //汇编操作数为al ax eax和dx寄存器  ****
+	static bool Asm_eax_id(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);  //汇编操作数为 eax和立即数  ****
+
 	static bool Asm_Grp_80_81_82_83(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format); //汇编操作码为 0x80 81 82 83 的分组指令
 	static bool Asm_Grp_8F(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
 	static bool Asm_Grp_C0_C1_D0_D1_D2_D3(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
@@ -100,4 +104,6 @@ public:
 	static bool Asm_Grp_0FBA(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
 	static bool Asm_Grp_0FC7(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
 	static bool Asm_ac(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
+	static bool Asm_ad(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
+	static bool Asm_a4(SAsmStr* asmStr, SAsmResult* asmResult, SInstructFmt* format);
 };

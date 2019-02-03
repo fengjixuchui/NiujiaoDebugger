@@ -77,10 +77,10 @@
     <ClInclude Include="PubLib\DisasmObj.h">
       <Filter>头文件\PubLib</Filter>
     </ClInclude>
-    <ClInclude Include="DbgEngine\asm_struct.h">
+    <ClInclude Include="DbgEngine\asm.h">
       <Filter>头文件\DbgEngine</Filter>
     </ClInclude>
-    <ClInclude Include="DbgEngine\asm.h">
+    <ClInclude Include="DbgEngine\asm_general_struct.h">
       <Filter>头文件\DbgEngine</Filter>
     </ClInclude>
   </ItemGroup>

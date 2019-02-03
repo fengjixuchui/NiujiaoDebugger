@@ -67,12 +67,12 @@ enum {
 
 enum {ZERO_OPERAND, ONE_OPERAND, TWO_OPERAND, THREE_OPERAND, FOUR_OPERAND};
 
-//操作数内容打包成一个整数 a占前三位 其余占5位
-#define PACK_OPERAND(a,b,c,d,e,f,g,h,i) ((UINT64)a+((UINT64)b<<3)+((UINT64)c<<8)+((UINT64)d<<13)+((UINT64)e<<18)+((UINT64)f<<23)+((UINT64)g<<28)+((UINT64)h<<33)+((UINT64)i<<38))
+//操作数内容打包成一个整数 a占前三位 其余占6位
+#define PACK_OPERAND(a,b,c,d,e,f,g,h,i) ((UINT64)a+((UINT64)b<<3)+((UINT64)c<<9)+((UINT64)d<<15)+((UINT64)e<<21)+((UINT64)f<<27)+((UINT64)g<<33)+((UINT64)h<<39)+((UINT64)i<<45))
 //获取操作数数量
-#define GET_OPERAND_NUM(x)  (x&3)
-#define GET_ADDRES_TYPE(x,i) ((x>>(3+10*i))&0x1F)
-#define GET_OPERAND_TYPE(x,i) ((x>>(8+10*i))&0x1F)
+#define GET_OPERAND_NUM(x)  (x&7)
+#define GET_ADDRES_TYPE(x,i) ((x>>(3+12*i))&0x3F)
+#define GET_OPERAND_TYPE(x,i) ((x>>(9+12*i))&0x3F)
 
 
 //寻址模式  intel手册 2512
@@ -86,21 +86,38 @@ enum EAddressType {
 
 //操作数类型 intel手册 2512
 enum EOperandType {
+	RG__AX=0, 
+	RG8__AL=0,
+	RG__CX=1, 
+	RG8__CL=1,
+	RG__DX=2, 
+	RG8__DL=2,
+	RG__BX=3, 
+	RG8__BL=3,
+	RG__SP=4, 
+	RG8__AH=4,
+	RG__BP=5,
+	RG8__CH=5,
+	RG__SI=6, 
+	RG8__DH=6,
+	RG__DI=7, 
+	RG8__BH=7,
+	RG__ES=8,
+	RG8__MAX = 8,
+	RG__SS, 
+	RG__CS, 
+	RG__DS, 
+	RG__GS, 
+	RG__FS,
+	RG__MAX = 16,
 	OT__a, OT__b, OT__c, OT__d, OT__dq, OT__p, OT__pd, OT__pi, OT__ps, OT__q, OT__qq, OT__s, OT__sd, OT__ss, OT__si, OT__v, OT__w, OT__x, OT__y, OT__z,OT_zero,OT_one
 };
 
-enum ERegister8
-{
-	RG8__AL, RG8__CL, RG8__DL, RG8__BL, RG8__AH, RG8__CH, RG8__DH, RG8__BH
-};
 enum EOperandBits
 {
 	OPERAND_BYTE, OPERAND_WORD, OPERAND_DOUBLE_WORD, OPERAND_QUAD_WORD, OPERAND_DOUBLE_QUAD_WORD, OPERAND_QUAD_QUAD_WORD
 };
-enum ERegisterType
-{
-	RG__AX, RG__CX, RG__DX, RG__BX, RG__SP, RG__BP, RG__SI, RG__DI, RG__ES, RG__SS, RG__CS, RG__DS, RG__GS, RG__FS,RG__MAX = 16
-};
+
 
 #define MAX_PREFIX_NUM 5
 typedef struct s_asm_str
