@@ -31,6 +31,8 @@ if __name__=="__main__":
         with open(".//test_data//{0}.txt".format(x),"r") as fd:
             data=fd.readlines()
             for y in data:
+                if y=="\n" or y[0]==';': #忽略空行和注释
+                    continue
                 yy=y.replace("\n","").split("|")
                 RunDisasmTest(yy[0],yy[1],int(yy[2]))
                 RunAsmTest(yy[0],yy[1],int(yy[2]))
